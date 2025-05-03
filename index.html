@@ -49,6 +49,7 @@
             
             <div class="settings-controls">
                 <button id="reset-defaults" title="Reset to defaults" class="reset-button">↺</button>
+                <button id="audio-settings-button" title="Audio Settings" class="audio-settings-button">🔊</button>
                 <button id="help-button" title="MIDI Mappings & Help" class="help-button">?</button>
             </div>
         </div>
@@ -56,8 +57,39 @@
         <div class="show-controls-button">⚙️</div>
     </div>
     
-    <div id="help-panel" class="help-panel">
-        <div class="help-panel-header">
+    <div id="audio-settings-panel" class="panel">
+        <div class="panel-header">
+            <h2>Audio Settings</h2>
+            <button id="close-audio-settings">×</button>
+        </div>
+        <div class="panel-content">
+            <div class="settings-group">
+                <h3>Audio Input Source</h3>
+                <select id="audio-source-select">
+                    <option value="">Select Audio Source...</option>
+                </select>
+                <button id="refresh-audio-sources" title="Refresh Audio Sources">↻</button>
+            </div>
+            
+            <div class="settings-group">
+                <h3>Audio Buffer Size</h3>
+                <select id="buffer-size-select">
+                    <option value="256">Small (256 samples)</option>
+                    <option value="512" selected>Medium (512 samples)</option>
+                    <option value="1024">Large (1024 samples)</option>
+                    <option value="2048">Extra Large (2048 samples)</option>
+                </select>
+                <p class="settings-help">Larger buffer sizes provide smoother audio visualization but more latency.</p>
+            </div>
+            
+            <div class="settings-actions">
+                <button id="apply-audio-settings">Apply Settings</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="help-panel" class="help-panel panel">
+        <div class="panel-header">
             <h2>MIDI Mappings & Controls</h2>
             <button id="close-help">×</button>
         </div>

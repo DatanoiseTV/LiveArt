@@ -259,7 +259,7 @@ select:focus {
     gap: 10px;
 }
 
-.reset-button, .help-button {
+.reset-button, .help-button, .audio-settings-button {
     background-color: #444;
     color: #fff;
     border: none;
@@ -275,7 +275,7 @@ select:focus {
     transition: background-color 0.2s ease;
 }
 
-.reset-button:hover, .help-button:hover {
+.reset-button:hover, .help-button:hover, .audio-settings-button:hover {
     background-color: #666;
 }
 
@@ -287,8 +287,16 @@ select:focus {
     background-color: #f44336;
 }
 
-/* Help panel */
-.help-panel {
+.audio-settings-button {
+    background-color: #2196F3;
+}
+
+.audio-settings-button:hover {
+    background-color: #1E88E5;
+}
+
+/* Panel styles (common for help, audio settings, etc.) */
+.panel {
     position: fixed;
     top: 50%;
     left: 50%;
@@ -307,11 +315,11 @@ select:focus {
     box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
 }
 
-.help-panel.active {
+.panel.active {
     display: flex;
 }
 
-.help-panel-header {
+.panel-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -319,12 +327,12 @@ select:focus {
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-.help-panel-header h2 {
+.panel-header h2 {
     font-size: 1.2rem;
     margin: 0;
 }
 
-.help-panel-header button {
+.panel-header button {
     background: none;
     border: none;
     color: #fff;
@@ -334,11 +342,95 @@ select:focus {
     transition: opacity 0.2s;
 }
 
-.help-panel-header button:hover {
+.panel-header button:hover {
     opacity: 1;
 }
 
+.panel-content {
+    padding: 20px;
+    overflow-y: auto;
+    max-height: calc(80vh - 60px);
+}
+
+/* Settings panel specific styles */
+.settings-group {
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.settings-group:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+}
+
+.settings-group h3 {
+    font-size: 1rem;
+    margin-bottom: 10px;
+    color: #ccc;
+}
+
+.settings-group select {
+    width: 100%;
+    max-width: 300px;
+    margin-bottom: 5px;
+}
+
+.settings-help {
+    font-size: 0.8em;
+    color: #aaa;
+    margin-top: 5px;
+}
+
+.settings-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 15px;
+}
+
+#refresh-audio-sources {
+    background-color: #444;
+    color: #fff;
+    border: none;
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.2s;
+    margin-left: 5px;
+    vertical-align: middle;
+}
+
+#refresh-audio-sources:hover {
+    background-color: #666;
+    transform: rotate(90deg);
+}
+
+#apply-audio-settings {
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    padding: 8px 15px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+#apply-audio-settings:hover {
+    background-color: #43A047;
+}
+
+/* Help panel specific styles */
+.help-panel {
+    /* Inherit basic panel styles */
+}
+
 .help-panel-content {
+    /* For backward compatibility */
     padding: 20px;
     overflow-y: auto;
     max-height: calc(80vh - 60px);

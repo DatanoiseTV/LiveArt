@@ -49,16 +49,45 @@ let learningButton = null; // The button that started the learning
 let learnStatus = null; // Element that shows learning status
 let cancelLearnButton = null; // Button to cancel learning
 
+// Global audio settings
+let audioSettings = {
+    selectedSourceId: null,
+    bufferSize: 512 // Default buffer size
+};
+
+// Load saved audio settings
+function loadAudioSettings() {
+    const savedSettings = localStorage.getItem('liveartAudioSettings');
+    if (savedSettings) {
+        try {
+            const parsed = JSON.parse(savedSettings);
+            audioSettings = {...audioSettings, ...parsed};
+            console.log('Loaded audio settings:', audioSettings);
+        } catch (e) {
+            console.warn('Error loading audio settings:', e);
+        }
+    }
+}
+
+// Save current audio settings
+function saveAudioSettings() {
+    localStorage.setItem('liveartAudioSettings', JSON.stringify(audioSettings));
+    console.log('Saved audio settings:', audioSettings);
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     console.log('DOM content loaded, initializing LiveArt application');
+    
+    // Load saved audio settings
+    loadAudioSettings();
     
     // Initialize main components
     const visualEngine = new VisualEngine('visualizer');
     const webglEngine = new WebGLVisuals('visualizer');
     
-    // Initialize audio system globally for all visualizations
-    visualEngine.initAudio();
-    console.log('Global audio system initialized');
+    // Initialize audio system globally with the saved settings
+    visualEngine.initAudio(audioSettings.bufferSize, audioSettings.selectedSourceId);
+    console.log('Global audio system initialized with settings:', audioSettings);
     
     // Track active visualization type
     let isWebGL = false;
@@ -358,6 +387,110 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     // Toggle live mode (hides all UI elements for projection)
+    // Audio Settings Panel functionality
+    const audioSettingsPanel = document.getElementById('audio-settings-panel');
+    const audioSettingsButton = document.getElementById('audio-settings-button');
+    const closeAudioSettingsButton = document.getElementById('close-audio-settings');
+    const audioSourceSelect = document.getElementById('audio-source-select');
+    const bufferSizeSelect = document.getElementById('buffer-size-select');
+    const refreshAudioSourcesButton = document.getElementById('refresh-audio-sources');
+    const applyAudioSettingsButton = document.getElementById('apply-audio-settings');
+    
+    // Initialize buffer size select with saved value
+    if (bufferSizeSelect) {
+        bufferSizeSelect.value = audioSettings.bufferSize.toString();
+    }
+    
+    // Function to list available audio input devices
+    async function listAudioDevices() {
+        try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const audioInputs = devices.filter(device => device.kind === 'audioinput');
+            
+            // Clear current options
+            audioSourceSelect.innerHTML = '<option value="">Default Audio Input</option>';
+            
+            // Add each audio input device
+            audioInputs.forEach(device => {
+                const option = document.createElement('option');
+                option.value = device.deviceId;
+                option.text = device.label || `Audio Input ${audioSourceSelect.options.length}`;
+                audioSourceSelect.appendChild(option);
+                
+                // Select the saved device if available
+                if (device.deviceId === audioSettings.selectedSourceId) {
+                    option.selected = true;
+                }
+            });
+            
+            console.log(`Found ${audioInputs.length} audio input devices`);
+        } catch (err) {
+            console.error('Error listing audio devices:', err);
+        }
+    }
+    
+    // Function to apply audio settings
+    function applyAudioSettings() {
+        // Get values from the form
+        const newSourceId = audioSourceSelect.value;
+        const newBufferSize = parseInt(bufferSizeSelect.value, 10);
+        
+        // Update settings
+        audioSettings.selectedSourceId = newSourceId;
+        audioSettings.bufferSize = newBufferSize;
+        
+        // Save settings
+        saveAudioSettings();
+        
+        // Restart audio with new settings
+        visualEngine.reinitializeAudio(newBufferSize, newSourceId);
+        
+        // Show confirmation
+        const notification = document.createElement('div');
+        notification.className = 'notification';
+        notification.textContent = 'Audio settings applied';
+        document.body.appendChild(notification);
+        setTimeout(() => {
+            if (notification.parentNode) notification.parentNode.removeChild(notification);
+        }, 1500);
+        
+        // Close the panel
+        audioSettingsPanel.classList.remove('active');
+    }
+    
+    // Event listeners for audio settings panel
+    if (audioSettingsButton) {
+        audioSettingsButton.addEventListener('click', () => {
+            // Request permission and enumerate devices on open
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then(stream => {
+                    stream.getTracks().forEach(track => track.stop()); // Stop tracks after getting permission
+                    listAudioDevices();
+                    audioSettingsPanel.classList.add('active');
+                })
+                .catch(err => {
+                    console.error('Error accessing media devices:', err);
+                    // Still show panel, but with a warning
+                    audioSettingsPanel.classList.add('active');
+                    alert('Could not access audio devices. Please check browser permissions.');
+                });
+        });
+    }
+    
+    if (closeAudioSettingsButton) {
+        closeAudioSettingsButton.addEventListener('click', () => {
+            audioSettingsPanel.classList.remove('active');
+        });
+    }
+    
+    if (refreshAudioSourcesButton) {
+        refreshAudioSourcesButton.addEventListener('click', listAudioDevices);
+    }
+    
+    if (applyAudioSettingsButton) {
+        applyAudioSettingsButton.addEventListener('click', applyAudioSettings);
+    }
+    
     function toggleLiveMode() {
         isLiveMode = !isLiveMode;
         
@@ -366,6 +499,7 @@ document.addEventListener('DOMContentLoaded', () => {
             controls.classList.add('hidden');
             showControlsButton.classList.add('hidden');
             helpPanelElement.classList.remove('active');
+            audioSettingsPanel.classList.remove('active');
             container.classList.add('live-mode');
             
             // Save live mode state

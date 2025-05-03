@@ -774,19 +774,24 @@ class VisualEngine {
     
     /**
      * Initialize audio input for audio reactive visualizations
+     * @param {number} bufferSize - FFT size for audio analysis (256, 512, 1024, 2048)
+     * @param {string} deviceId - Optional audio device ID to use for input
      */
-    initAudio() {
+    initAudio(bufferSize = 512, deviceId = null) {
         if (this.audioData.initialized) return;
+        
+        // Store the settings for later reference
+        this.audioData.bufferSize = bufferSize || 512;
+        this.audioData.deviceId = deviceId;
         
         try {
             // Create audio context
             const AudioContext = window.AudioContext || window.webkitAudioContext;
             const audioContext = new AudioContext();
             
-            // Create analyzer with larger FFT size
+            // Create analyzer with specified FFT size
             const analyser = audioContext.createAnalyser();
-            // For oscilloscope, we want more time-domain data points
-            analyser.fftSize = 1024; // Larger size for better oscilloscope resolution
+            analyser.fftSize = this.audioData.bufferSize;
             
             // Set up data arrays for both frequency and time domain
             const bufferLength = analyser.frequencyBinCount;
@@ -799,38 +804,36 @@ class VisualEngine {
             this.audioData.timeDomainArray = timeDomainArray;
             this.audioData.audioContext = audioContext;
             
-            console.log('Audio system created, requesting microphone access...');
+            console.log(`Audio system created with buffer size ${this.audioData.bufferSize}, requesting microphone access...`);
             
-            // Try to connect to user microphone
-            navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+            // Set up constraints with device ID if specified
+            const constraints = { 
+                audio: deviceId ? { deviceId: { exact: deviceId } } : true,
+                video: false 
+            };
+            
+            // Try to connect to user microphone with specified device (if any)
+            navigator.mediaDevices.getUserMedia(constraints)
                 .then(stream => {
-                    // Connect the microphone to the analyzer
-                    const source = audioContext.createMediaStreamSource(stream);
-                    source.connect(analyser);
-                    
-                    // Store the stream in case we need to reconnect later
-                    this.audioData.stream = stream;
-                    this.audioData.micSource = source;
-                    
-                    // Ensure audio context is running
-                    if (audioContext.state !== 'running') {
-                        audioContext.resume().then(() => {
-                            console.log('Audio context resumed');
-                        });
-                    }
-                    
-                    console.log('Live audio input connected successfully');
-                    this.audioData.initialized = true;
-                    this.audioData.liveAudioConnected = true;
+                    this.connectAudioStream(stream, audioContext, analyser);
                 })
                 .catch(err => {
-                    console.warn('Error initializing audio input:', err);
-                    // Mark as initialized but without live audio
-                    this.audioData.initialized = true;
-                    this.audioData.liveAudioConnected = false;
+                    console.warn(`Error initializing audio input ${deviceId ? 'with specified device' : ''}:`, err);
                     
-                    // Generate synthetic data for testing
-                    this.startSyntheticAudioGeneration();
+                    // If a specific device was requested but failed, try again with default device
+                    if (deviceId) {
+                        console.log('Trying again with default audio device...');
+                        navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+                            .then(stream => {
+                                this.connectAudioStream(stream, audioContext, analyser);
+                            })
+                            .catch(fallbackErr => {
+                                console.error('Error initializing audio with default device:', fallbackErr);
+                                this.initializeSyntheticAudio();
+                            });
+                    } else {
+                        this.initializeSyntheticAudio();
+                    }
                 });
         } catch (e) {
             console.warn('Web Audio API not supported:', e);
@@ -845,6 +848,90 @@ class VisualEngine {
                 console.log('Audio context resumed on user interaction');
             }
         }, { once: true });
+    }
+    
+    /**
+     * Connect audio stream to analyzer
+     */
+    connectAudioStream(stream, audioContext, analyser) {
+        // Connect the microphone to the analyzer
+        const source = audioContext.createMediaStreamSource(stream);
+        source.connect(analyser);
+        
+        // Store the stream and source for later reference
+        this.audioData.stream = stream;
+        this.audioData.micSource = source;
+        
+        // Ensure audio context is running
+        if (audioContext.state !== 'running') {
+            audioContext.resume().then(() => {
+                console.log('Audio context resumed');
+            });
+        }
+        
+        console.log('Live audio input connected successfully');
+        this.audioData.initialized = true;
+        this.audioData.liveAudioConnected = true;
+        
+        // Log info about the audio tracks
+        const audioTracks = stream.getAudioTracks();
+        if (audioTracks.length > 0) {
+            console.log('Using audio device:', audioTracks[0].label);
+        }
+    }
+    
+    /**
+     * Initialize synthetic audio data when no microphone is available
+     */
+    initializeSyntheticAudio() {
+        // Mark as initialized but without live audio
+        this.audioData.initialized = true;
+        this.audioData.liveAudioConnected = false;
+        
+        // Generate synthetic data for testing
+        this.startSyntheticAudioGeneration();
+    }
+    
+    /**
+     * Reinitialize audio with new settings
+     * @param {number} bufferSize - FFT size for audio analysis
+     * @param {string} deviceId - Optional audio device ID
+     */
+    reinitializeAudio(bufferSize = 512, deviceId = null) {
+        console.log(`Reinitializing audio with buffer size ${bufferSize}, device ID: ${deviceId || 'default'}`);
+        
+        // Clean up existing audio resources
+        this.cleanupAudio();
+        
+        // Reset initialization flag
+        this.audioData.initialized = false;
+        
+        // Initialize with new settings
+        this.initAudio(bufferSize, deviceId);
+    }
+    
+    /**
+     * Clean up audio resources
+     */
+    cleanupAudio() {
+        // Stop any existing audio stream
+        if (this.audioData.stream) {
+            this.audioData.stream.getTracks().forEach(track => track.stop());
+        }
+        
+        // Disconnect audio source if it exists
+        if (this.audioData.micSource) {
+            this.audioData.micSource.disconnect();
+        }
+        
+        // Close audio context if it exists
+        if (this.audioData.audioContext) {
+            this.audioData.audioContext.close().catch(err => {
+                console.warn('Error closing audio context:', err);
+            });
+        }
+        
+        console.log('Audio resources cleaned up');
     }
     
     /**
@@ -1646,6 +1733,8 @@ class VisualEngine {
             micSource: null,
             smoothedValues: Array(128).fill(0),
             peakLevel: 0.1,
+            bufferSize: 512, // Default buffer size
+            deviceId: null,  // Default to system default audio input
             initialized: false,
             liveAudioConnected: false
         };
