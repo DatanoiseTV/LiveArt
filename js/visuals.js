@@ -2257,23 +2257,30 @@ class VisualEngine {
         // Default point count for visualization
         let pointCount = 256;
         
-        // Check if we have time domain data from audio input
-        let hasLiveAudio = false;
+        // Always use audio data when available
+        let useSyntheticData = false;
         
         if (this.audioData.initialized && this.audioData.timeDomainArray) {
             // Use the time domain data directly
             const timeData = this.audioData.timeDomainArray;
             const timeDataLength = timeData.length;
             
-            // Check if we have non-silent data (not all center values)
-            for (let i = 0; i < timeData.length; i += 16) { // Check every 16th sample for speed
-                if (Math.abs(timeData[i] - 128) > 3) { // Using small threshold for noise
-                    hasLiveAudio = true;
-                    break;
+            // Calculate audio signal level
+            let maxSignal = 0;
+            let hasAnySignal = false;
+            
+            for (let i = 0; i < timeData.length; i += 8) { // Sample every 8th point for performance
+                const deviation = Math.abs(timeData[i] - 128);
+                maxSignal = Math.max(maxSignal, deviation);
+                if (deviation > 0) {
+                    hasAnySignal = true;
                 }
             }
             
-            if (hasLiveAudio) {
+            // Use synthetic data only when absolutely no signal is present
+            useSyntheticData = !hasAnySignal;
+            
+            if (!useSyntheticData) {
                 // We have audio input, use real-time waveform for X/Y
                 pointCount = Math.min(512, timeDataLength / 2);
                 
@@ -2281,15 +2288,34 @@ class VisualEngine {
                 // This creates a Lissajous pattern from a single audio source
                 const halfLength = Math.floor(timeDataLength / 2);
                 
+                // Find maximum deviation for auto-scaling
+                let maxDeviation = 0;
+                
+                // Sample the data to find the maximum amplitude
+                for (let i = 0; i < timeDataLength; i++) {
+                    maxDeviation = Math.max(maxDeviation, Math.abs(timeData[i] - 128));
+                }
+                
+                // Calculate scaling factor - ensure we fill the oscilloscope display
+                // If max deviation is too small, limit the scaling to avoid amplifying noise
+                const scaleFactor = maxDeviation < 3 ? 1.0 : (127 / Math.max(1, maxDeviation));
+                
+                // Always scale to at least fill 80% of display, but allow for headroom
+                const targetScale = Math.max(scaleFactor, 0.8);
+                
                 for (let i = 0; i < pointCount; i++) {
                     // Map our point index to audio data indices
                     const xIndex = Math.floor(i * halfLength / pointCount);
                     const yIndex = halfLength + Math.floor(i * halfLength / pointCount);
                     
-                    // Convert data from 0-255 range to -1.0 to 1.0 range
+                    // Convert data from 0-255 range to -1.0 to 1.0 range with scaling
                     // 128 is the center/silence value
-                    xData[i] = (timeData[xIndex] / 128.0 - 1.0);
-                    yData[i] = (timeData[yIndex % timeDataLength] / 128.0 - 1.0);
+                    const xRaw = timeData[xIndex] - 128;
+                    const yRaw = timeData[yIndex % timeDataLength] - 128;
+                    
+                    // Apply scaling to fill the display
+                    xData[i] = (xRaw * targetScale) / 128.0;
+                    yData[i] = (yRaw * targetScale) / 128.0;
                 }
                 
                 // Apply phase rotation for more interesting patterns
@@ -2310,15 +2336,18 @@ class VisualEngine {
                     xData[i] = x * cosPhase - y * sinPhase;
                     yData[i] = x * sinPhase + y * cosPhase;
                 }
-                
-                console.log("Using live audio for oscilloscope");
             }
         }
         
-        // If we don't have live audio, generate synthetic patterns
-        if (!hasLiveAudio) {
+        // Use synthetic patterns if needed
+        if (useSyntheticData) {
             // Create X and Y data as sine/cosine waves with phase differences
             // This produces classic Lissajous patterns
+            
+            // Calculate amplitude modulation for breathing effect
+            // This makes the synthetic pattern expand and contract naturally
+            const baseAmplitude = 0.8 + Math.sin(time * 0.1) * 0.15;
+            
             for (let i = 0; i < pointCount; i++) {
                 const phase = (i / pointCount) * Math.PI * 8;
                 
@@ -2329,16 +2358,16 @@ class VisualEngine {
                 const dynamicRatio = frequencyRatio + Math.sin(time * 0.05) * 0.02;
                 
                 // X axis: sine wave with one frequency
-                xData[i] = Math.sin(phase + time * 0.2);
+                xData[i] = Math.sin(phase + time * 0.2) * baseAmplitude;
                 
                 // Y axis: sine wave with different frequency for Lissajous pattern
-                yData[i] = Math.sin(phase * dynamicRatio + time * 0.25);
+                yData[i] = Math.sin(phase * dynamicRatio + time * 0.25) * baseAmplitude;
                 
                 // Add complexity with harmonics
                 // More harmonics = more complex pattern
                 const harmonicStrength = complexity * 0.03;
-                xData[i] += Math.sin(phase * 3 + time * 0.1) * harmonicStrength;
-                yData[i] += Math.sin(phase * 5 + time * 0.15) * harmonicStrength;
+                xData[i] += Math.sin(phase * 3 + time * 0.1) * harmonicStrength * baseAmplitude;
+                yData[i] += Math.sin(phase * 5 + time * 0.15) * harmonicStrength * baseAmplitude;
                 
                 // Add very subtle random noise for authentic look
                 xData[i] += (Math.random() - 0.5) * 0.01;
