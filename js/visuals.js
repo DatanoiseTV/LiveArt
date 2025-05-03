@@ -2157,7 +2157,10 @@ class VisualEngine {
      * This provides a 2D canvas-based alternative to the WebGL implementation
      */
     renderOscilloscope() {
-        // Initialize audio if not already done
+        // Make sure audio is initialized
+        if (!this.audioData.initialized) {
+            this.initAudio();
+        }
         this.updateAudioData();
         
         // Get parameters
@@ -2183,66 +2186,62 @@ class VisualEngine {
         let xData = [];
         let yData = [];
         
-        // Check if we have actual audio data
-        let hasAudioData = this.audioData.initialized && this.audioData.dataArray && this.audioData.dataArray.length > 0;
+        // Try to get audio data for the oscilloscope
+        let useRealAudio = false;
+        let timeData = null;
+        let pointCount = 256;
         
-        if (hasAudioData) {
-            // Create a time domain data array just for oscilloscope
-            // We need to get the time domain data for proper oscilloscope display
-            const analyser = this.audioData.analyser;
-            if (analyser) {
-                // Use a larger buffer for better oscilloscope resolution
+        // Check if audio system is initialized with valid analyzer
+        if (this.audioData.initialized && this.audioData.analyser) {
+            try {
+                const analyser = this.audioData.analyser;
                 const scopeBufferSize = analyser.fftSize;
-                const timeData = new Uint8Array(scopeBufferSize);
                 
-                // Get time domain data (waveform) for the oscilloscope
+                // Create buffer for time domain data
+                timeData = new Uint8Array(scopeBufferSize);
+                
+                // Get time domain data (waveform)
                 analyser.getByteTimeDomainData(timeData);
                 
-                // Use a subset of points for better performance
-                const pointCount = Math.min(256, scopeBufferSize / 2);
-                
-                // Use one half of the buffer for X and the other half for Y
-                // This simulates stereo input for Lissajous patterns
-                for (let i = 0; i < pointCount; i++) {
-                    // Map our loop index to the data array
-                    const xIndex = Math.floor(i * (scopeBufferSize / 2) / pointCount);
-                    const yIndex = Math.floor(i * (scopeBufferSize / 2) / pointCount) + (scopeBufferSize / 2);
-                    
-                    // Convert from 0-255 range to -1.0 to 1.0 range
-                    // 128 is the center/silence value in time domain data
-                    xData[i] = (timeData[xIndex] / 128.0 - 1.0);
-                    yData[i] = (timeData[yIndex % scopeBufferSize] / 128.0 - 1.0);
-                    
-                    // For better Lissajous patterns, apply a phase offset to Y data
-                    // This simulates the phase difference between stereo channels
-                    const phaseOffset = this.time * speed * 0.1;
-                    const oldX = xData[i];
-                    const oldY = yData[i];
-                    const cosPhase = Math.cos(phaseOffset);
-                    const sinPhase = Math.sin(phaseOffset);
-                    
-                    yData[i] = oldY * cosPhase + oldX * sinPhase * complexity * 0.2;
+                // Check if we have actual data (not just silence which would be all 128)
+                for (let i = 0; i < timeData.length; i++) {
+                    if (Math.abs(timeData[i] - 128) > 2) { // Check for non-silent data
+                        useRealAudio = true;
+                        break;
+                    }
                 }
-            } else {
-                // If no analyzer is available, fall back to frequency data
-                const dataLength = this.audioData.dataArray.length;
-                const pointCount = Math.min(256, dataLength);
                 
-                for (let i = 0; i < pointCount; i++) {
-                    const index = Math.floor(i * dataLength / pointCount);
+                if (useRealAudio) {
+                    // Use time domain data for the oscilloscope
+                    pointCount = Math.min(256, scopeBufferSize / 2);
                     
-                    // For X axis, use first half of audio data
-                    xData[i] = (this.audioData.dataArray[index] / 128.0 - 1.0);
-                    
-                    // For Y axis, use offset index
-                    const offsetIndex = (index + Math.floor(dataLength / 2)) % dataLength;
-                    yData[i] = (this.audioData.dataArray[offsetIndex] / 128.0 - 1.0);
+                    for (let i = 0; i < pointCount; i++) {
+                        // Map loop index to data indices for X and Y channels
+                        const xIndex = Math.floor(i * (scopeBufferSize / 2) / pointCount);
+                        const yIndex = Math.floor(i * (scopeBufferSize / 2) / pointCount) + (scopeBufferSize / 2);
+                        
+                        // Convert from 0-255 range to -1.0 to 1.0 range
+                        xData[i] = (timeData[xIndex] / 128.0 - 1.0);
+                        yData[i] = (timeData[yIndex % scopeBufferSize] / 128.0 - 1.0);
+                        
+                        // Apply phase offset for better Lissajous patterns
+                        const phaseOffset = time * 0.1;
+                        const oldX = xData[i];
+                        const oldY = yData[i];
+                        const cosPhase = Math.cos(phaseOffset);
+                        const sinPhase = Math.sin(phaseOffset);
+                        
+                        yData[i] = oldY * cosPhase + oldX * sinPhase * complexity * 0.2;
+                    }
                 }
+            } catch (error) {
+                console.warn("Oscilloscope audio error:", error.message);
+                useRealAudio = false;
             }
-        } else {
-            // Generate synthetic waveforms for demo
-            const pointCount = 256;
-            
+        }
+        
+        // Generate synthetic waveforms if we couldn't get real audio data
+        if (!useRealAudio) {
             // Create X and Y data as sine/cosine waves with phase differences
             // This produces classic Lissajous patterns
             for (let i = 0; i < pointCount; i++) {
@@ -2255,16 +2254,16 @@ class VisualEngine {
                 const dynamicRatio = frequencyRatio + Math.sin(time * 0.05) * 0.02;
                 
                 // X axis: sine wave with one frequency
-                xData[i] = Math.sin(phase + time * speed * 0.2);
+                xData[i] = Math.sin(phase + time * 0.2);
                 
                 // Y axis: sine wave with different frequency for Lissajous pattern
-                yData[i] = Math.sin(phase * dynamicRatio + time * speed * 0.25);
+                yData[i] = Math.sin(phase * dynamicRatio + time * 0.25);
                 
                 // Add complexity with harmonics
                 // More harmonics = more complex pattern
                 const harmonicStrength = complexity * 0.03;
-                xData[i] += Math.sin(phase * 3 + time * speed * 0.1) * harmonicStrength;
-                yData[i] += Math.sin(phase * 5 + time * speed * 0.15) * harmonicStrength;
+                xData[i] += Math.sin(phase * 3 + time * 0.1) * harmonicStrength;
+                yData[i] += Math.sin(phase * 5 + time * 0.15) * harmonicStrength;
                 
                 // Add very subtle random noise for authentic look
                 xData[i] += (Math.random() - 0.5) * 0.01;
