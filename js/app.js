@@ -950,6 +950,74 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
     
+    // Function to reset MIDI mappings to defaults
+    function resetMidiMappings() {
+        if (!confirm('This will reset all MIDI mappings to default values. Continue?')) {
+            return;
+        }
+        
+        // Remove the saved mappings from localStorage
+        localStorage.removeItem('liveArtMidiMappings');
+        
+        // Restore default mappings
+        MIDI_MAPPINGS = {
+            // Core parameters
+            1: { param: 'hue', name: 'Color Hue' },
+            2: { param: 'saturation', name: 'Color Saturation' },
+            3: { param: 'brightness', name: 'Brightness' },
+            4: { param: 'density', name: 'Density' },
+            5: { param: 'speed', name: 'Animation Speed' },
+            6: { param: 'size', name: 'Element Size' },
+            7: { param: 'complexity', name: 'Complexity' },
+            
+            // Secondary parameters
+            8: { param: 'rotation', name: 'Rotation' },
+            9: { param: 'zoom', name: 'Zoom', min: 0.5, max: 2.0 },
+            10: { param: 'noiseScale', name: 'Pattern Scale', min: 0.001, max: 0.05 },
+            11: { param: 'noiseSpeed', name: 'Pattern Speed', min: 0.001, max: 0.01 },
+            12: { param: 'symmetry', name: 'Symmetry', min: 1, max: 16, integer: true },
+            13: { param: 'reactivity', name: 'Reactivity' },
+            
+            // Special controls
+            14: { param: 'special', name: 'Randomize', action: 'randomize' },
+            15: { param: 'special', name: 'Next Preset', action: 'nextPreset' },
+            
+            // Visual-specific parameters
+            16: { param: 'special', name: 'Kaleidoscope Symmetry', action: 'kaleidoscopeSymmetry', min: 3, max: 16, integer: true },
+            17: { param: 'special', name: 'Lissajous Freq Ratio', action: 'lissajousFreqRatio', min: 1, max: 8, integer: true },
+            18: { param: 'special', name: 'Voronoi Cell Size', action: 'voronoiCellSize', min: 0.1, max: 1.0 },
+            19: { param: 'special', name: 'Tentacle Count', action: 'tentacleCount', min: 3, max: 20, integer: true },
+            20: { param: 'special', name: 'Circuit Complexity', action: 'circuitComplexity', min: 0.1, max: 1.0 },
+            21: { param: 'special', name: 'Flow Direction', action: 'flowDirection', min: 0, max: 1.0 },
+            
+            // 3D WebGL specific controls
+            22: { param: 'rotationX', name: '3D Rotate X', min: -Math.PI, max: Math.PI },
+            23: { param: 'rotationY', name: '3D Rotate Y', min: -Math.PI, max: Math.PI },
+            24: { param: 'rotationZ', name: '3D Rotate Z', min: -Math.PI, max: Math.PI },
+            25: { param: 'positionX', name: '3D Position X', min: -5, max: 5 },
+            26: { param: 'positionY', name: '3D Position Y', min: -5, max: 5 },
+            27: { param: 'positionZ', name: '3D Position Z', min: -5, max: 5 },
+            28: { param: 'particleCount', name: 'Particle Count', min: 100, max: 5000, integer: true },
+            29: { param: 'particleSize', name: 'Particle Size', min: 0.1, max: 2.0 },
+            30: { param: 'particleSpeed', name: 'Particle Speed', min: 0.1, max: 2.0 },
+            31: { param: 'trailLength', name: 'Trail Length', min: 0, max: 1.0 },
+            
+            // Effects
+            32: { param: 'glitchIntensity', name: 'Glitch Effect' },
+            33: { param: 'bloomIntensity', name: 'Bloom Intensity' },
+            34: { param: 'bloomThreshold', name: 'Bloom Threshold', min: 0, max: 1.0 },
+            35: { param: 'rgbShiftAmount', name: 'RGB Shift Amount', min: 0, max: 0.02 }
+        };
+        
+        // Update the mapping table with new defaults
+        updateMappingTable();
+        
+        // Save the default mappings
+        saveMidiMappings();
+        
+        console.log('MIDI mappings reset to defaults');
+    }
+    
     // Connect MIDI controller to visuals with improved mapping
     if (typeof midiController !== 'undefined') {
         midiController.onAnyControlChange((ccNumber, value) => {
@@ -1487,6 +1555,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const mappingTable = document.getElementById('midi-mapping-table').querySelector('tbody');
     const learnStatus = document.getElementById('learn-status');
     const cancelLearnButton = document.getElementById('cancel-learn');
+    const resetMidiMapButton = document.getElementById('reset-midi-map');
     
     // Add elements for exporting/importing mappings
     const exportButton = document.createElement('button');
@@ -1884,6 +1953,9 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Setup the cancel button
     cancelLearnButton.addEventListener('click', cancelLearnMode);
+    
+    // Setup the reset MIDI map button
+    resetMidiMapButton.addEventListener('click', resetMidiMappings);
     
     // Object to store CC Map presets
     let ccMapPresets = {};

@@ -2,6 +2,9 @@
 
 A web-based VJ tool for real-time generative visuals controlled via MIDI.
 
+## Demo
+[Live Demo](https://datanoisetv.github.io/LiveArt/)
+
 ## Features
 
 - Real-time 2D and 3D visualizations
