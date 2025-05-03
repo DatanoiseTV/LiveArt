@@ -87,11 +87,40 @@ class MidiController {
         
         // Add available inputs
         if (this.midiAccess) {
+            let hasInputs = false;
+            
             for (const input of this.midiAccess.inputs.values()) {
                 const option = document.createElement('option');
                 option.value = input.id;
                 option.textContent = input.name;
                 dropdown.appendChild(option);
+                hasInputs = true;
+            }
+            
+            // Update status indicator
+            const indicator = document.querySelector('.indicator');
+            if (indicator) {
+                if (hasInputs) {
+                    indicator.classList.add('available');
+                } else {
+                    indicator.classList.remove('available');
+                    indicator.classList.remove('connected');
+                }
+            }
+            
+            // If no inputs detected, show message in dropdown
+            if (!hasInputs) {
+                const noDevicesOption = document.createElement('option');
+                noDevicesOption.value = 'no-devices';
+                noDevicesOption.textContent = 'No MIDI devices detected';
+                noDevicesOption.disabled = true;
+                dropdown.appendChild(noDevicesOption);
+                
+                // Update status text
+                const deviceLabel = document.querySelector('.midi-status span');
+                if (deviceLabel) {
+                    deviceLabel.textContent = 'No MIDI devices';
+                }
             }
         }
         
