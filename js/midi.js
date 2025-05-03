@@ -242,6 +242,25 @@ class MidiController {
         this.programChangeCallback = callback;
     }
     
+    // Register a one-time callback for the next CC change
+    once(callback) {
+        const originalCallback = this.anyControlChangeCallback;
+        
+        // Set a one-time callback wrapper
+        this.anyControlChangeCallback = (ccNumber, value) => {
+            // Call our one-time callback first
+            callback(ccNumber, value);
+            
+            // Then call original callback if it exists
+            if (originalCallback) {
+                originalCallback(ccNumber, value);
+            }
+            
+            // Restore original callback
+            this.anyControlChangeCallback = originalCallback;
+        };
+    }
+    
     // Utility method to get a CC value
     getCC(ccNumber) {
         return this.ccValues.get(ccNumber) || 0;

@@ -1875,25 +1875,6 @@ document.addEventListener('DOMContentLoaded', () => {
         learnStatus.textContent = `Move a MIDI controller to map to "${learningParameter.name}"`;
         cancelLearnButton.classList.remove('hidden');
         
-        // Listen for next MIDI CC message
-        midiController.once = function(callback) {
-            const originalCallback = midiController.anyControlChangeCallback;
-            
-            // Set a one-time callback
-            midiController.anyControlChangeCallback = (ccNumber, value) => {
-                // Call original callback first
-                if (originalCallback) {
-                    originalCallback(ccNumber, value);
-                }
-                
-                // Then our one-time handler
-                callback(ccNumber, value);
-                
-                // Restore the original callback
-                midiController.anyControlChangeCallback = originalCallback;
-            };
-        };
-        
         // Listen for the next CC message
         midiController.once((ccNumber, value) => {
             if (!isLearning) return; // Just in case it was canceled

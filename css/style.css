@@ -417,11 +417,17 @@ select:focus {
     margin-bottom: 10px;
     flex-wrap: wrap;
     gap: 10px;
+    position: relative;
 }
 
 #learn-status {
     font-size: 0.9em;
     color: #ccc;
+    margin-right: 10px;
+    flex-grow: 1;
+}
+
+#cancel-learn {
     margin-right: 10px;
 }
 
@@ -434,7 +440,6 @@ select:focus {
     cursor: pointer;
     font-size: 0.8em;
     transition: background-color 0.2s;
-    margin-left: auto;
 }
 
 .reset-midi-button:hover {
