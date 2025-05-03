@@ -26,6 +26,7 @@ Default mappings:
 - CCs 16-21: Visualization-specific parameters
 - CCs 22-24: 3D controls (rotation, translation)
 - CCs 25-34: Post-processing effects
+- CCs 35-39: Particle Trails controls (position, size, brightness, trail length)
 
 ## Keyboard Shortcuts
 
@@ -37,6 +38,7 @@ Default mappings:
 - H: Hide/show controls
 - M: Show MIDI mappings
 - L: Toggle LIVE MODE (hide all UI for projection)
+- E: Toggle effects on/off
 - X/Y/Z: 3D rotation/translation (with Shift for larger steps)
 - R: Reset 3D transformations
 

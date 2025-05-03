@@ -344,29 +344,77 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 10000);
     }
     
-    // Function to reset all settings to defaults
+    // Function to reset parameters to defaults
     function resetToDefaults() {
-        if (!confirm('This will reset all settings to defaults. Are you sure?')) {
+        if (!confirm('This will reset all visual parameters to defaults. Presets and MIDI mappings will be preserved. Continue?')) {
             return;
         }
         
-        // Clear all saved settings
+        // Only remove the parameters settings - preserve presets and MIDI mappings
         localStorage.removeItem('liveArtLastSettings');
-        localStorage.removeItem('liveArtUserPresets');
-        localStorage.removeItem('liveArtMidiMappings');
         localStorage.removeItem('liveArtLiveMode');
-        localStorage.removeItem('liveArtCCMapPresets');
+        
+        // Reset parameter values directly
+        // Apply default values to both engines
+        Object.keys(DEFAULT_PARAMS).forEach(key => {
+            visualEngine.setParam(key, DEFAULT_PARAMS[key]);
+            webglEngine.setParam(key, DEFAULT_PARAMS[key]);
+        });
+        
+        // Reset 3D transformation values
+        webglEngine.rotationX = 0;
+        webglEngine.rotationY = 0;
+        webglEngine.translationZ = 0;
+        
+        // Reset trail particles parameters
+        webglEngine.trailParams = {
+            particleX: 0.5,
+            particleY: 0.5,
+            particleSize: 0.5,
+            particleBrightness: 0.8,
+            trailLength: 0.7,
+            particleCount: 100
+        };
+        
+        // Reset effect parameters
+        webglEngine.effectParams = {
+            glitchIntensity: 0,
+            bloomStrength: 0,
+            bloomThreshold: 0.5,
+            bloomRadius: 0,
+            rgbShiftAmount: 0,
+            vignetteAmount: 0
+        };
+        
+        visualEngine.effectParams = {
+            glitchIntensity: 0,
+            chromaticAberration: 0,
+            pixelate: 0,
+            vignette: 0,
+            bloom: 0,
+            feedbackAmount: 0
+        };
+        
+        // Disable effects
+        visualEngine.effectsEnabled = false;
+        webglEngine.effectsEnabled = false;
+        
+        // Reset visual type to particles (2D)
+        const presetSelector = document.getElementById('visual-preset');
+        if (presetSelector) {
+            presetSelector.value = 'particles';
+            const event = new Event('change');
+            presetSelector.dispatchEvent(event);
+        }
         
         // Show success notification
         const notification = document.createElement('div');
         notification.className = 'notification';
-        notification.textContent = 'Settings reset to defaults. Reloading...';
+        notification.textContent = 'Parameters reset to defaults';
         document.body.appendChild(notification);
         
-        // Reload the page after a short delay
-        setTimeout(() => {
-            window.location.reload();
-        }, 1500);
+        // Save the reset settings
+        setTimeout(saveCurrentSettings, 500);
     }
     
     // Setup reset defaults button
@@ -1310,6 +1358,21 @@ document.addEventListener('DOMContentLoaded', () => {
         // G key to toggle grid visibility in 3D scenes
         if (e.key.toLowerCase() === 'g' && isWebGL) {
             webglEngine.toggleGrid();
+        }
+        
+        // E key to toggle effects
+        if (e.key.toLowerCase() === 'e') {
+            // Toggle effects in the active engine
+            if (isWebGL) {
+                webglEngine.effectsEnabled = !webglEngine.effectsEnabled;
+                console.log(`3D Effects: ${webglEngine.effectsEnabled ? 'Enabled' : 'Disabled'}`);
+            } else {
+                visualEngine.effectsEnabled = !visualEngine.effectsEnabled;
+                console.log(`2D Effects: ${visualEngine.effectsEnabled ? 'Enabled' : 'Disabled'}`);
+            }
+            
+            // Save settings after toggling effects
+            setTimeout(saveCurrentSettings, 500);
         }
     });
     
