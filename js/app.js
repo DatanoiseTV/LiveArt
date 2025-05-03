@@ -1218,6 +1218,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.key.toLowerCase() === 'l') {
             toggleLiveMode();
         }
+        
+        // G key to toggle grid visibility in 3D scenes
+        if (e.key.toLowerCase() === 'g' && isWebGL) {
+            webglEngine.toggleGrid();
+        }
     });
     
     // Fullscreen toggle function

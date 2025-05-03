@@ -14,6 +14,9 @@ class WebGLVisuals {
         this.time = 0;
         this.lastTimeUpdated = 0;
         
+        // Grid visibility flag
+        this.showGrid = false; // Grid is hidden by default
+        
         // 3D transformation properties that can be controlled via MIDI
         this.rotationX = 0;
         this.rotationY = 0;
@@ -523,6 +526,20 @@ class WebGLVisuals {
     }
     
     /**
+     * Toggle grid visibility
+     */
+    toggleGrid() {
+        this.showGrid = !this.showGrid;
+        
+        // Update any existing grid helpers in the scene
+        if (this.objects.gridHelper) {
+            this.objects.gridHelper.visible = this.showGrid;
+        }
+        
+        console.log(`Grid visibility: ${this.showGrid ? 'visible' : 'hidden'}`);
+    }
+    
+    /**
      * Update post-processing effects
      */
     updateEffects() {
@@ -741,6 +758,7 @@ class WebGLVisuals {
         
         // Create a subtle background with a grid
         const gridHelper = new THREE.GridHelper(30, 30, 0x444444, 0x222222);
+        gridHelper.visible = this.showGrid; // Set visibility based on showGrid flag
         this.scene.add(gridHelper);
         
         // Store in objects

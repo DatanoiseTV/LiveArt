@@ -33,6 +33,7 @@ Default mappings:
 - Space: Randomize parameters
 - Arrow keys: Change visual preset
 - F: Toggle fullscreen
+- G: Toggle floor grid visibility in 3D views
 - H: Hide/show controls
 - M: Show MIDI mappings
 - L: Toggle LIVE MODE (hide all UI for projection)
