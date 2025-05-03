@@ -7,6 +7,13 @@
 let MIDI_MAPPINGS = {}; // Will be populated with defaults or from localStorage
 let mappingTable = null; // Will be initialized when DOM is ready
 
+// MIDI learning state
+let isLearning = false; // Whether we're in MIDI learn mode
+let learningParameter = null; // The parameter being mapped during learning
+let learningButton = null; // The button that started the learning
+let learnStatus = null; // Element that shows learning status
+let cancelLearnButton = null; // Button to cancel learning
+
 document.addEventListener('DOMContentLoaded', () => {
     // Initialize main components
     const visualEngine = new VisualEngine('visualizer');
@@ -1566,11 +1573,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const helpButton = document.getElementById('help-button');
     const closeHelpButton = document.getElementById('close-help');
     
-    // Initialize global mappingTable reference
+    // Initialize global references
     mappingTable = document.getElementById('midi-mapping-table')?.querySelector('tbody');
+    learnStatus = document.getElementById('learn-status');
+    cancelLearnButton = document.getElementById('cancel-learn');
     
-    const learnStatus = document.getElementById('learn-status');
-    const cancelLearnButton = document.getElementById('cancel-learn');
     const resetMidiMapButton = document.getElementById('reset-midi-map');
     
     // Setup event listeners for all buttons immediately after getting the elements
@@ -1625,10 +1632,7 @@ document.addEventListener('DOMContentLoaded', () => {
         learnStatus.parentNode.insertBefore(helpActions, learnStatus.nextSibling);
     }
     
-    // State for MIDI learning
-    let isLearning = false;
-    let learningParameter = null;
-    let learningButton = null;
+    // Note: MIDI learning state is now managed via global variables declared at the top of the file
     
     // Toggle help panel visibility
     // Timer for updating mapping values
@@ -2033,10 +2037,18 @@ document.addEventListener('DOMContentLoaded', () => {
         };
         
         // Update UI
-        learningButton.classList.add('learning');
-        learningButton.textContent = 'Waiting...';
-        learnStatus.textContent = `Move a MIDI controller to map to "${learningParameter.name}"`;
-        cancelLearnButton.classList.remove('hidden');
+        if (learningButton) {
+            learningButton.classList.add('learning');
+            learningButton.textContent = 'Waiting...';
+        }
+        
+        if (learnStatus && learningParameter) {
+            learnStatus.textContent = `Move a MIDI controller to map to "${learningParameter.name}"`;
+        }
+        
+        if (cancelLearnButton) {
+            cancelLearnButton.classList.remove('hidden');
+        }
         
         console.log(`Entering learn mode for ${learningParameter.name}`);
         
@@ -2071,8 +2083,15 @@ document.addEventListener('DOMContentLoaded', () => {
         isLearning = false;
         learningParameter = null;
         learningButton = null;
-        learnStatus.textContent = 'Click "Learn" and move a controller to map it';
-        cancelLearnButton.classList.add('hidden');
+        
+        // Update UI elements if they exist
+        if (learnStatus) {
+            learnStatus.textContent = 'Click "Learn" and move a controller to map it';
+        }
+        
+        if (cancelLearnButton) {
+            cancelLearnButton.classList.add('hidden');
+        }
     }
     
     // Map a CC number to a parameter
