@@ -50,7 +50,11 @@ class VisualEngine {
             noiseSpeed: 0.005,   // For noise-based patterns
             symmetry: 4,         // Symmetry divisions
             reactivity: 0.5,     // How reactive visuals are to changes
+            smoothing: 0.5       // Parameter smoothing (0-1)
         };
+        
+        // Target values for smooth interpolation
+        this.targetParams = {...this.params};
         
         // Current visual algorithm
         this.currentVisual = 'particles';
@@ -136,6 +140,9 @@ class VisualEngine {
         const delta = timestamp - this.lastFrameTime;
         this.lastFrameTime = timestamp;
         
+        // Update parameters with smoothing
+        this.updateParamsWithSmoothing(delta);
+        
         // Update global time (scaled by speed)
         this.time += delta * 0.001 * this.mapParam(this.params.speed, 0.2, 2);
         
@@ -184,21 +191,29 @@ class VisualEngine {
      * @param {number} value - Parameter value (0-1)
      */
     setParam(paramName, value) {
-        // Set standard parameter
+        // Set target parameter for smoother transitions
         if (this.params.hasOwnProperty(paramName)) {
-            // Apply reactivity - blend between current and new value
+            // For the smoothing parameter itself, apply immediately with reactivity
+            if (paramName === 'smoothing') {
+                const reactivity = this.params.reactivity;
+                this.params[paramName] = this.params[paramName] * (1 - reactivity) + value * reactivity;
+                this.targetParams[paramName] = this.params[paramName];
+                return;
+            }
+            
+            // Apply reactivity to the target value
             const reactivity = this.params.reactivity;
-            this.params[paramName] = this.params[paramName] * (1 - reactivity) + value * reactivity;
+            this.targetParams[paramName] = this.targetParams[paramName] * (1 - reactivity) + value * reactivity;
         }
         
         // Check if this is an effect parameter
         if (this.effectParams && this.effectParams.hasOwnProperty(paramName)) {
-            // Apply reactivity for smooth transitions
+            // Apply reactivity for smooth transitions to target
             const reactivity = this.params.reactivity || 0.5;
             this.effectParams[paramName] = this.effectParams[paramName] * (1 - reactivity) + value * reactivity;
         }
         
-        // Toggle effects globally
+        // Toggle effects globally - apply immediately without smoothing
         if (paramName === 'effectsEnabled') {
             this.effectsEnabled = value > 0.5;
         }

@@ -26,7 +26,8 @@ document.addEventListener('DOMContentLoaded', () => {
         speed: 0.2,         // Animation speed (reduced from 0.5)
         size: 0.5,          // Element size
         rotation: 0.1,      // Rotation speed (reduced from 0.2)
-        symmetry: 6         // Symmetry factor
+        symmetry: 6,        // Symmetry factor
+        smoothing: 0.5      // Parameter smoothing (0 = instant, 1 = very smooth)
     };
     
     // User preset storage
@@ -891,6 +892,7 @@ document.addEventListener('DOMContentLoaded', () => {
         { param: 'noiseSpeed', name: 'Pattern Speed', min: 0.001, max: 0.01 },
         { param: 'symmetry', name: 'Symmetry', min: 1, max: 16, integer: true },
         { param: 'reactivity', name: 'Reactivity' },
+        { param: 'smoothing', name: 'Parameter Smoothing', min: 0, max: 0.99 },
         { param: 'special', name: 'Randomize', action: 'randomize' },
         { param: 'special', name: 'Next Preset', action: 'nextPreset' },
         { param: 'special', name: 'Kaleidoscope Symmetry', action: 'kaleidoscopeSymmetry', min: 3, max: 16, integer: true },
@@ -1905,8 +1907,12 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             row.appendChild(valueCell);
             
-            // Learn button
+            // Action cell with Learn and Unlearn buttons
             const actionCell = document.createElement('td');
+            actionCell.style.display = 'flex';
+            actionCell.style.gap = '5px';
+            
+            // Learn button
             const learnButton = document.createElement('button');
             learnButton.className = 'learn-button';
             learnButton.textContent = 'Learn';
@@ -1922,6 +1928,34 @@ document.addEventListener('DOMContentLoaded', () => {
             
             learnButton.addEventListener('click', startLearnMode);
             actionCell.appendChild(learnButton);
+            
+            // Unlearn button (only show if parameter is mapped)
+            const mappingEntries = Object.entries(MIDI_MAPPINGS).filter(([_, config]) => {
+                // Check basic param match
+                if (config.param !== paramConfig.param) return false;
+                
+                // For special actions, make sure they match
+                if (config.param === 'special' && config.action !== paramConfig.action) return false;
+                
+                // For visualization-specific params, check the visualType too
+                if (paramConfig.visualType && config.visualType !== paramConfig.visualType) return false;
+                
+                return true;
+            });
+            
+            if (mappingEntries.length > 0) {
+                const unlearnButton = document.createElement('button');
+                unlearnButton.className = 'unlearn-button';
+                unlearnButton.textContent = 'Unlearn';
+                unlearnButton.dataset.param = paramConfig.param;
+                unlearnButton.dataset.ccNumber = mappingEntries[0][0]; // Store the CC number to remove
+                if (paramConfig.action) {
+                    unlearnButton.dataset.action = paramConfig.action;
+                }
+                
+                unlearnButton.addEventListener('click', unlearnMapping);
+                actionCell.appendChild(unlearnButton);
+            }
             row.appendChild(actionCell);
             
             // Add row to table
@@ -1990,6 +2024,26 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     // Map a CC number to a parameter
+    // Function to unlearn (remove) a MIDI mapping
+    function unlearnMapping(e) {
+        const ccNumber = e.target.dataset.ccNumber;
+        const paramName = e.target.closest('tr').querySelector('td:first-child').textContent;
+        
+        if (ccNumber && MIDI_MAPPINGS[ccNumber]) {
+            // Confirm before removing
+            if (confirm(`Remove MIDI mapping for "${paramName}" (CC ${ccNumber})?`)) {
+                console.log(`Removing mapping for CC ${ccNumber} (${paramName})`);
+                delete MIDI_MAPPINGS[ccNumber];
+                
+                // Save mappings to localStorage
+                saveMidiMappings();
+                
+                // Update the mapping table
+                updateMappingTable();
+            }
+        }
+    }
+    
     function mapCCToParameter(ccNumber, paramConfig) {
         // First, check if this CC is already mapped and remove it
         for (const cc in MIDI_MAPPINGS) {

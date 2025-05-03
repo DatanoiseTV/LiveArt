@@ -55,8 +55,12 @@ class WebGLVisuals {
             complexity: 0.5,     // Scene complexity (0-1)
             rotation: 0,         // Global rotation
             zoom: 1,             // Camera zoom
-            reactivity: 0.5      // Reactivity to changes
+            reactivity: 0.5,     // Reactivity to changes
+            smoothing: 0.5       // Parameter smoothing (0-1)
         };
+        
+        // Target parameters for smooth interpolation
+        this.targetParams = {...this.params};
         
         // Visual scenes
         this.currentScene = 'cubeField';
@@ -336,9 +340,17 @@ class WebGLVisuals {
     setParam(paramName, value) {
         // Handle regular parameters
         if (this.params.hasOwnProperty(paramName)) {
-            // Apply reactivity - blend between current and new value
+            // For the smoothing parameter itself, apply immediately with reactivity
+            if (paramName === 'smoothing') {
+                const reactivity = this.params.reactivity;
+                this.params[paramName] = this.params[paramName] * (1 - reactivity) + value * reactivity;
+                this.targetParams[paramName] = this.params[paramName];
+                return;
+            }
+            
+            // Apply reactivity to the target value
             const reactivity = this.params.reactivity;
-            this.params[paramName] = this.params[paramName] * (1 - reactivity) + value * reactivity;
+            this.targetParams[paramName] = this.targetParams[paramName] * (1 - reactivity) + value * reactivity;
         }
         
         // Handle 3D transformation parameters
@@ -656,6 +668,9 @@ class WebGLVisuals {
             const now = performance.now();
             const delta = (now - this.lastTimeUpdated) * 0.001; // Convert to seconds
             this.lastTimeUpdated = now;
+            
+            // Update parameters with smoothing
+            this.updateParamsWithSmoothing(delta);
             
             // Update FPS counter
             this.updateFPS(delta);

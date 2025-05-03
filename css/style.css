@@ -402,6 +402,21 @@ select:focus {
     animation: pulse-bg 1.5s infinite;
 }
 
+.unlearn-button {
+    background-color: #FF5722;
+    color: white;
+    border: none;
+    padding: 5px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8em;
+    transition: background-color 0.2s;
+}
+
+.unlearn-button:hover {
+    background-color: #E64A19;
+}
+
 #cancel-learn {
     background-color: #555;
     margin-left: 10px;
