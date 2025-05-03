@@ -3,8 +3,9 @@
  * Main application that connects MIDI to visuals
  */
 
-// Initialize global MIDI mapping state
+// Initialize global state variables
 let MIDI_MAPPINGS = {}; // Will be populated with defaults or from localStorage
+let mappingTable = null; // Will be initialized when DOM is ready
 
 document.addEventListener('DOMContentLoaded', () => {
     // Initialize main components
@@ -1564,7 +1565,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // Using the already declared helpPanelElement from above
     const helpButton = document.getElementById('help-button');
     const closeHelpButton = document.getElementById('close-help');
-    const mappingTable = document.getElementById('midi-mapping-table').querySelector('tbody');
+    
+    // Initialize global mappingTable reference
+    mappingTable = document.getElementById('midi-mapping-table')?.querySelector('tbody');
+    
     const learnStatus = document.getElementById('learn-status');
     const cancelLearnButton = document.getElementById('cancel-learn');
     const resetMidiMapButton = document.getElementById('reset-midi-map');
@@ -1753,11 +1757,21 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
     
-    // Function to update the mapping table
     // Function to update CC values in the mapping table without recreating it
     function updateMappingValues() {
         // Only proceed if the help panel is visible
         if (!helpPanelElement.classList.contains('active')) return;
+        
+        // Make sure mappingTable is available
+        if (!mappingTable) {
+            console.warn('Mapping table not found for value updates, attempting to get it again...');
+            mappingTable = document.getElementById('midi-mapping-table')?.querySelector('tbody');
+            
+            if (!mappingTable) {
+                // Just skip silently, since this function is called periodically
+                return;
+            }
+        }
         
         // Loop through all rows in the mapping table
         const rows = mappingTable.querySelectorAll('tr');
@@ -1812,10 +1826,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     function updateMappingTable() {
-        // Make sure mappingTable is available
+        // Try to get or re-get the mapping table if it's not available
         if (!mappingTable) {
-            console.error('Mapping table not found! Unable to update MIDI mappings display.');
-            return;
+            console.warn('Mapping table not found, attempting to get it again...');
+            mappingTable = document.getElementById('midi-mapping-table')?.querySelector('tbody');
+            
+            if (!mappingTable) {
+                console.error('Mapping table still not found! Unable to update MIDI mappings display.');
+                return;
+            }
         }
         
         console.log('Updating mapping table with', Object.keys(MIDI_MAPPINGS).length, 'mappings');
