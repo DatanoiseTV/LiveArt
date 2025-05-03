@@ -1182,125 +1182,193 @@ class WebGLVisuals {
         dirLight.position.set(0, 1, 2);
         this.scene.add(dirLight);
         
-        // Base parameters
+        // Add point light at center for more glow
+        const centerLight = new THREE.PointLight(0xffffff, 1.5, 50);
+        centerLight.position.set(0, 0, 0);
+        this.scene.add(centerLight);
+        
+        // Base parameters - similar to particle system
         const hue = this.params.hue;
         const saturation = this.params.saturation;
         const brightness = this.params.brightness;
-        const complexity = this.mapParam(this.params.complexity, 0.1, 1.0);
-        const particleCount = Math.floor(this.mapParam(this.params.density, 20, 200));
+        const particleCount = Math.floor(this.mapParam(this.params.density, 500, 3000));
+        const spread = this.mapParam(this.params.complexity, 5, 15);
         
         // Store particle count in trail params
         this.trailParams.particleCount = particleCount;
         
-        // Create a texture for particles
-        const texture = this.createParticleTexture();
+        // Create particle texture - same as regular particles
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const size = 128;
+        canvas.width = size;
+        canvas.height = size;
         
-        // Create a trail system
-        const trailSystem = new THREE.Group();
-        this.scene.add(trailSystem);
+        // Draw a soft circle with gradient
+        const gradient = ctx.createRadialGradient(
+            size/2, size/2, 0,
+            size/2, size/2, size/2
+        );
+        gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
+        gradient.addColorStop(0.3, 'rgba(255, 255, 255, 0.8)');
+        gradient.addColorStop(0.7, 'rgba(255, 255, 255, 0.3)');
+        gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
         
-        // Trail positions array - each particle will have a trail of positions
-        const trailLength = Math.floor(this.mapParam(this.trailParams.trailLength, 5, 50));
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, size, size);
+        
+        // Create texture from canvas
+        const texture = new THREE.CanvasTexture(canvas);
+        
+        // Create main particles group
+        const particlesGroup = new THREE.Group();
+        this.scene.add(particlesGroup);
+        
+        // Trail length from params
+        const trailLength = Math.floor(this.mapParam(this.trailParams.trailLength, 10, 30));
+        
+        // Arrays to store particles data
+        const particles = [];
         const trails = [];
-        const trailMeshes = [];
+        const velocities = [];
         
         // Create particles and their trails
         for (let i = 0; i < particleCount; i++) {
-            // Initial position
-            const positions = [];
+            // Create particle position using sphere distribution - just like in particle system
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.acos(2 * Math.random() - 1);
+            const radius = Math.cbrt(Math.random()) * spread; // Cube root for uniform volume distribution
             
-            // Create a trail of positions (initially the same position)
-            const startX = (Math.random() - 0.5) * 10;
-            const startY = (Math.random() - 0.5) * 10;
-            const startZ = (Math.random() - 0.5) * 10;
+            const x = Math.sin(phi) * Math.cos(theta) * radius;
+            const y = Math.sin(phi) * Math.sin(theta) * radius;
+            const z = Math.cos(phi) * radius;
             
-            // Fill trail with initial positions
+            // Color varies by distance from center
+            const distanceRatio = radius / spread;
+            const particleHue = (hue + distanceRatio * 0.5) % 1;
+            const particleColor = this.hsvToThree(particleHue, saturation, brightness);
+            
+            // Create particle size based on params
+            const particleSize = this.mapParam(this.params.size, 0.05, 0.3) * (0.5 + distanceRatio);
+            
+            // Initialize trail array for this particle
+            const trail = [];
             for (let j = 0; j < trailLength; j++) {
-                positions.push(new THREE.Vector3(startX, startY, startZ));
+                trail.push(new THREE.Vector3(x, y, z));
             }
+            trails.push(trail);
             
-            // Store the trail
-            trails.push(positions);
-            
-            // Create line geometry for the trail
-            const geometry = new THREE.BufferGeometry();
+            // Create line for the trail
+            const trailGeometry = new THREE.BufferGeometry();
             const linePositions = new Float32Array(trailLength * 3);
             
-            // Fill buffer with positions
+            // Fill initial positions
             for (let j = 0; j < trailLength; j++) {
                 const idx = j * 3;
-                linePositions[idx] = positions[j].x;
-                linePositions[idx + 1] = positions[j].y;
-                linePositions[idx + 2] = positions[j].z;
+                linePositions[idx] = x;
+                linePositions[idx + 1] = y;
+                linePositions[idx + 2] = z;
             }
             
-            geometry.setAttribute('position', new THREE.BufferAttribute(linePositions, 3));
+            trailGeometry.setAttribute('position', new THREE.BufferAttribute(linePositions, 3));
             
-            // Create a gradient material for the trail
-            // Color varies by position along trail
-            const trailColor = this.hsvToThree(
-                (hue + i / particleCount * 0.2) % 1, 
-                saturation, 
-                brightness
-            );
-            
-            const material = new THREE.LineBasicMaterial({
-                color: trailColor,
+            // Create trail material with fade
+            const trailMaterial = new THREE.LineBasicMaterial({
+                color: particleColor,
                 transparent: true,
-                opacity: 0.7,
-                blending: THREE.AdditiveBlending,
+                opacity: 0.6,
+                blending: THREE.AdditiveBlending
             });
             
-            // Create the trail line
-            const line = new THREE.Line(geometry, material);
-            trailSystem.add(line);
-            trailMeshes.push({
-                line: line,
-                geometry: geometry,
-                positions: linePositions
-            });
+            // Create line
+            const trailLine = new THREE.Line(trailGeometry, trailMaterial);
+            particlesGroup.add(trailLine);
             
-            // Create a particle at the head of the trail
-            const particleSize = this.mapParam(this.trailParams.particleSize, 0.2, 1.5);
-            const particleGeometry = new THREE.SphereGeometry(particleSize, 8, 8);
-            const particleMaterial = new THREE.MeshPhongMaterial({
-                color: trailColor,
-                emissive: trailColor.clone().multiplyScalar(0.5),
-                transparent: true,
-                opacity: 0.9,
-                shininess: 80
-            });
-            
-            const particle = new THREE.Mesh(particleGeometry, particleMaterial);
-            particle.position.copy(positions[0]);
-            trailSystem.add(particle);
-            
-            // Store data for animation
-            const headParticle = {
-                mesh: particle,
-                velocity: new THREE.Vector3(
-                    (Math.random() - 0.5) * 0.05,
-                    (Math.random() - 0.5) * 0.05,
-                    (Math.random() - 0.5) * 0.05
-                ),
-                size: particleSize,
-                material: particleMaterial
+            // Store velocity info like in particle system
+            const speed = 0.02 + Math.random() * 0.03;
+            const velocity = {
+                x: (Math.random() - 0.5) * speed,
+                y: (Math.random() - 0.5) * speed,
+                z: (Math.random() - 0.5) * speed,
+                orbit: Math.random() * Math.PI * 2,
+                orbitSpeed: (Math.random() * 0.5 + 0.5) * 0.01,
+                orbitRadius: radius * (0.1 + Math.random() * 0.2)
             };
+            velocities.push(velocity);
             
-            // Add to trailMeshes
-            trailMeshes[i].headParticle = headParticle;
+            // Store particle info
+            particles.push({
+                position: new THREE.Vector3(x, y, z),
+                color: particleColor,
+                size: particleSize,
+                trail: trail,
+                trailLine: trailLine,
+                trailGeometry: trailGeometry,
+                trailPositions: linePositions,
+                originalRadius: radius
+            });
         }
         
-        // Store in objects
-        this.objects.trailSystem = trailSystem;
+        // Create particle system point cloud for heads
+        const particleGeometry = new THREE.BufferGeometry();
+        const particlePositions = new Float32Array(particleCount * 3);
+        const particleColors = new Float32Array(particleCount * 3);
+        const particleSizes = new Float32Array(particleCount);
+        
+        // Fill particle attributes
+        for (let i = 0; i < particleCount; i++) {
+            const i3 = i * 3;
+            const p = particles[i];
+            
+            particlePositions[i3] = p.position.x;
+            particlePositions[i3 + 1] = p.position.y;
+            particlePositions[i3 + 2] = p.position.z;
+            
+            particleColors[i3] = p.color.r;
+            particleColors[i3 + 1] = p.color.g;
+            particleColors[i3 + 2] = p.color.b;
+            
+            particleSizes[i] = p.size * 2; // Make head particles larger than regular particles
+        }
+        
+        // Set particle geometry attributes
+        particleGeometry.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
+        particleGeometry.setAttribute('color', new THREE.BufferAttribute(particleColors, 3));
+        particleGeometry.setAttribute('size', new THREE.BufferAttribute(particleSizes, 1));
+        
+        // Create particle material
+        const particleMaterial = new THREE.PointsMaterial({
+            size: this.mapParam(this.params.size, 0.05, 0.3),
+            vertexColors: true,
+            map: texture,
+            transparent: true,
+            opacity: 0.9,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            sizeAttenuation: true
+        });
+        
+        // Create point cloud
+        const pointCloud = new THREE.Points(particleGeometry, particleMaterial);
+        particlesGroup.add(pointCloud);
+        
+        // Add a subtle background with a grid
+        const gridHelper = new THREE.GridHelper(30, 30, 0x444444, 0x222222);
+        gridHelper.visible = this.showGrid; // Set visibility based on showGrid flag
+        this.scene.add(gridHelper);
+        
+        // Store everything in objects
+        this.objects.particles = particles;
         this.objects.trails = trails;
-        this.objects.trailMeshes = trailMeshes;
+        this.objects.velocities = velocities;
+        this.objects.particleGeometry = particleGeometry;
+        this.objects.particleMaterial = particleMaterial;
+        this.objects.particlesGroup = particlesGroup;
+        this.objects.centerLight = centerLight;
+        this.objects.gridHelper = gridHelper;
         this.objects.trailLength = trailLength;
         this.objects.texture = texture;
-        
-        // Create a target point influenced by MIDI controls
-        const targetPoint = new THREE.Vector3(0, 0, 0);
-        this.objects.targetPoint = targetPoint;
+        this.objects.particleCount = particleCount;
     }
     
     /**
@@ -1334,131 +1402,198 @@ class WebGLVisuals {
      * @param {number} delta - Time since last frame in seconds
      */
     updateTrailParticlesScene(delta) {
-        if (!this.objects.trails || !this.objects.trailMeshes) return;
+        if (!this.objects.particles || !this.objects.trails || !this.objects.velocities) return;
         
+        const particles = this.objects.particles;
         const trails = this.objects.trails;
-        const trailMeshes = this.objects.trailMeshes;
+        const velocities = this.objects.velocities;
+        const particleCount = this.objects.particleCount;
         const trailLength = this.objects.trailLength || 20;
-        const trailSystem = this.objects.trailSystem;
+        const particlesGroup = this.objects.particlesGroup;
         
-        // Global parameters
+        // Get parameters
         const hue = this.params.hue;
         const saturation = this.params.saturation;
         const brightness = this.params.brightness;
         const speed = this.mapParam(this.params.speed, 0.5, 3) * delta;
+        const spread = this.mapParam(this.params.complexity, 5, 15);
         
-        // Trail parameters
-        const particleX = this.trailParams.particleX;
-        const particleY = this.trailParams.particleY;
-        const particleSize = this.trailParams.particleSize;
-        const particleBrightness = this.trailParams.particleBrightness;
+        // MIDI controlled parameters
+        const trailLengthParam = this.trailParams.trailLength; // Affects trail opacity
+        const particleBrightness = this.trailParams.particleBrightness; // Affects particle glow
         
-        // Update target point based on MIDI controls
-        // Map from 0-1 to scene coordinates
-        this.objects.targetPoint.x = (particleX * 2 - 1) * 15; // Range: -15 to 15
-        this.objects.targetPoint.y = (particleY * 2 - 1) * 15; // Range: -15 to 15
-        this.objects.targetPoint.z = 0;
-        
-        // Update each trail
-        for (let i = 0; i < trails.length; i++) {
-            const trail = trails[i];
-            const trailMesh = trailMeshes[i];
-            const headParticle = trailMesh.headParticle;
-            
-            // Calculate attraction force towards target point
-            const targetDirection = new THREE.Vector3().subVectors(
-                this.objects.targetPoint, 
-                headParticle.mesh.position
+        // Update center light color
+        if (this.objects.centerLight) {
+            this.objects.centerLight.color = this.hsvToThree(
+                (hue + this.time * 0.1) % 1, 
+                saturation * 0.7, 
+                brightness
             );
+        }
+        
+        // Get particle positions and colors from geometry
+        const particlePositions = this.objects.particleGeometry.getAttribute('position').array;
+        const particleColors = this.objects.particleGeometry.getAttribute('color').array;
+        
+        // Update each particle
+        for (let i = 0; i < particleCount; i++) {
+            const i3 = i * 3;
+            const particle = particles[i];
+            const trail = trails[i];
+            const v = velocities[i];
             
-            // Normalize and scale by attraction force
-            const attractionForce = 0.01 * speed;
-            targetDirection.normalize().multiplyScalar(attractionForce);
+            // Calculate current position
+            const x = particlePositions[i3];
+            const y = particlePositions[i3 + 1];
+            const z = particlePositions[i3 + 2];
             
-            // Add some random variation for organic movement
-            const randomness = 0.002 * speed;
-            headParticle.velocity.x += (Math.random() - 0.5) * randomness;
-            headParticle.velocity.y += (Math.random() - 0.5) * randomness;
-            headParticle.velocity.z += (Math.random() - 0.5) * randomness;
+            // Calculate distance from center
+            const dist = Math.sqrt(x*x + y*y + z*z);
             
-            // Apply attraction force to velocity
-            headParticle.velocity.add(targetDirection);
-            
-            // Limit velocity
-            const maxVelocity = 0.2 * speed;
-            if (headParticle.velocity.length() > maxVelocity) {
-                headParticle.velocity.normalize().multiplyScalar(maxVelocity);
+            // Apply orbital motion similar to particle system
+            if (v.orbit !== undefined) {
+                v.orbit += v.orbitSpeed * speed * 5;
+                
+                // Apply orbital component based on current position
+                const orbitalInfluence = Math.min(1, dist / (spread * 0.5)); // More effect farther out
+                
+                // Create normalized direction vector from center
+                let nx = x / (dist || 1);
+                let ny = y / (dist || 1);
+                let nz = z / (dist || 1);
+                
+                // Create perpendicular vector for orbit
+                const px = -ny;
+                const py = nx;
+                const pz = 0; // Simplify by orbiting on XY plane
+                
+                // Update position with velocity and orbital component
+                particlePositions[i3] += (v.x + px * v.orbitRadius * orbitalInfluence * Math.cos(v.orbit)) * speed;
+                particlePositions[i3 + 1] += (v.y + py * v.orbitRadius * orbitalInfluence * Math.sin(v.orbit)) * speed;
+                particlePositions[i3 + 2] += (v.z + pz * v.orbitRadius * orbitalInfluence) * speed;
+            } else {
+                // Basic motion for particles without orbital component
+                particlePositions[i3] += v.x * speed;
+                particlePositions[i3 + 1] += v.y * speed;
+                particlePositions[i3 + 2] += v.z * speed;
             }
             
-            // Update head particle position
-            headParticle.mesh.position.add(headParticle.velocity);
+            // Apply gravitational pull toward/away from center based on time
+            const gravityDirection = Math.sin(this.time * 0.2) > 0 ? 1 : -1;
+            const gravity = gravityDirection * speed * 0.05;
             
-            // Update particle size based on MIDI control
-            const newSize = this.mapParam(particleSize, 0.2, 1.5);
-            headParticle.mesh.scale.set(newSize, newSize, newSize);
+            // Direction to/from center
+            const newX = particlePositions[i3];
+            const newY = particlePositions[i3 + 1];
+            const newZ = particlePositions[i3 + 2];
+            const newDist = Math.sqrt(newX*newX + newY*newY + newZ*newZ);
             
-            // Update particle brightness
-            const colorIntensity = this.mapParam(particleBrightness, 0.2, 1.5);
-            const particleColor = this.hsvToThree(
-                (hue + i / trails.length * 0.2) % 1, 
-                saturation, 
-                brightness * colorIntensity
+            if (newDist > 0.1) { // Avoid division by zero
+                particlePositions[i3] -= (newX / newDist) * gravity * newDist * 0.1;
+                particlePositions[i3 + 1] -= (newY / newDist) * gravity * newDist * 0.1;
+                particlePositions[i3 + 2] -= (newZ / newDist) * gravity * newDist * 0.1;
+            }
+            
+            // Boundary check with smooth reset
+            const maxDist = spread * 0.8;
+            if (newDist > maxDist) {
+                // Reset to random position closer to center
+                const resetDist = maxDist * 0.3;
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.acos(2 * Math.random() - 1);
+                particlePositions[i3] = Math.sin(phi) * Math.cos(theta) * resetDist;
+                particlePositions[i3 + 1] = Math.sin(phi) * Math.sin(theta) * resetDist;
+                particlePositions[i3 + 2] = Math.cos(phi) * resetDist;
+                
+                // Randomize orbit
+                if (v.orbit !== undefined) {
+                    v.orbit = Math.random() * Math.PI * 2;
+                }
+            }
+            
+            // Update color based on position and time with MIDI brightness control
+            const finalDist = Math.sqrt(
+                particlePositions[i3]*particlePositions[i3] + 
+                particlePositions[i3+1]*particlePositions[i3+1] + 
+                particlePositions[i3+2]*particlePositions[i3+2]
             );
-            headParticle.material.color = particleColor;
-            headParticle.material.emissive = particleColor.clone().multiplyScalar(0.5);
+            const distRatio = finalDist / spread;
+            
+            const particleHue = (hue + distRatio * 0.5 + this.time * 0.05) % 1;
+            const color = this.hsvToThree(
+                particleHue, 
+                Math.min(1, saturation * (0.7 + distRatio * 0.5)), 
+                Math.min(1, brightness * particleBrightness * (0.7 + distRatio * 0.3))
+            );
+            
+            particleColors[i3] = color.r;
+            particleColors[i3 + 1] = color.g;
+            particleColors[i3 + 2] = color.b;
+            
+            // Update particle's stored position
+            particle.position.set(
+                particlePositions[i3],
+                particlePositions[i3 + 1],
+                particlePositions[i3 + 2]
+            );
             
             // Update trail positions (shift all positions forward)
-            // The head of the trail follows the particle, the rest follow the previous position
             for (let j = trailLength - 1; j > 0; j--) {
                 trail[j].copy(trail[j - 1]);
             }
             
-            // Head of trail is at the particle position
-            trail[0].copy(headParticle.mesh.position);
+            // Head of trail is at current particle position
+            trail[0].copy(particle.position);
             
-            // Update line geometry for the trail
+            // Update trail line positions
             for (let j = 0; j < trailLength; j++) {
                 const idx = j * 3;
-                trailMesh.positions[idx] = trail[j].x;
-                trailMesh.positions[idx + 1] = trail[j].y;
-                trailMesh.positions[idx + 2] = trail[j].z;
+                particle.trailPositions[idx] = trail[j].x;
+                particle.trailPositions[idx + 1] = trail[j].y;
+                particle.trailPositions[idx + 2] = trail[j].z;
             }
             
-            // Make positions at the end of the trail fade out by scaling them closer together
-            const fadeStartIndex = Math.floor(trailLength * 0.7); // Start fading at 70% through the trail
+            // Apply fade to trail end by adjusting positions
+            const fadeStartIndex = Math.floor(trailLength * 0.6);
             if (trailLength > fadeStartIndex) {
                 for (let j = fadeStartIndex; j < trailLength; j++) {
                     const fadeRatio = (j - fadeStartIndex) / (trailLength - fadeStartIndex);
                     const idx = j * 3;
                     
-                    // Get position of this point and the previous point
-                    const x = trailMesh.positions[idx];
-                    const y = trailMesh.positions[idx + 1];
-                    const z = trailMesh.positions[idx + 2];
+                    // Get position and previous position
+                    const x = particle.trailPositions[idx];
+                    const y = particle.trailPositions[idx + 1];
+                    const z = particle.trailPositions[idx + 2];
                     
                     const prevIdx = Math.max(0, (j - 1) * 3);
-                    const prevX = trailMesh.positions[prevIdx];
-                    const prevY = trailMesh.positions[prevIdx + 1];
-                    const prevZ = trailMesh.positions[prevIdx + 2];
+                    const prevX = particle.trailPositions[prevIdx];
+                    const prevY = particle.trailPositions[prevIdx + 1];
+                    const prevZ = particle.trailPositions[prevIdx + 2];
                     
-                    // Move point closer to previous point based on fade ratio
-                    trailMesh.positions[idx] = x + (prevX - x) * fadeRatio * 0.3;
-                    trailMesh.positions[idx + 1] = y + (prevY - y) * fadeRatio * 0.3;
-                    trailMesh.positions[idx + 2] = z + (prevZ - z) * fadeRatio * 0.3;
+                    // Move point closer to previous point
+                    particle.trailPositions[idx] = x + (prevX - x) * fadeRatio * 0.3;
+                    particle.trailPositions[idx + 1] = y + (prevY - y) * fadeRatio * 0.3;
+                    particle.trailPositions[idx + 2] = z + (prevZ - z) * fadeRatio * 0.3;
                 }
             }
             
-            // Update material opacity along the trail
-            // Adjust opacity for trail effect - make the line fade out
-            const opacityByDistance = this.mapParam(this.trailParams.trailLength, 0, 1) * 0.8 + 0.2;
-            trailMesh.line.material.opacity = opacityByDistance;
+            // Update trail line material color and opacity
+            particle.trailLine.material.color = color;
+            
+            // Adjust trail opacity based on MIDI control
+            const trailOpacity = this.mapParam(trailLengthParam, 0.2, 0.8);
+            particle.trailLine.material.opacity = trailOpacity;
             
             // Mark buffer for update
-            trailMesh.geometry.getAttribute('position').needsUpdate = true;
+            particle.trailGeometry.getAttribute('position').needsUpdate = true;
         }
         
-        // Rotate the entire trail system slightly
-        trailSystem.rotation.y += this.params.rotation * delta * 0.2;
+        // Update geometry attributes
+        this.objects.particleGeometry.getAttribute('position').needsUpdate = true;
+        this.objects.particleGeometry.getAttribute('color').needsUpdate = true;
+        
+        // Rotate the entire particle system
+        particlesGroup.rotation.y += this.params.rotation * delta * 0.2;
     }
     
     /**
