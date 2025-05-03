@@ -1,0 +1,954 @@
+/**
+ * WebGLVisuals - 3D visualization engine using Three.js
+ * This provides additional WebGL-based 3D visualizations for LiveArt
+ */
+class WebGLVisuals {
+    constructor(containerId) {
+        // Get the container
+        this.container = document.getElementById(containerId);
+        
+        // Set up WebGL state and flags
+        this.isInitialized = false;
+        this.isActive = false;
+        this.frameId = null;
+        this.time = 0;
+        this.lastTimeUpdated = 0;
+        
+        // Parameters (mirroring the same structure as in VisualEngine)
+        this.params = {
+            hue: 0.5,            // Base color hue (0-1)
+            saturation: 0.8,     // Color saturation (0-1)
+            brightness: 0.9,     // Color brightness (0-1)
+            density: 0.5,        // Object density (0-1)
+            speed: 0.5,          // Animation speed (0-1)
+            size: 0.5,           // Object size (0-1)
+            complexity: 0.5,     // Scene complexity (0-1)
+            rotation: 0,         // Global rotation
+            zoom: 1,             // Camera zoom
+            reactivity: 0.5      // Reactivity to changes
+        };
+        
+        // Visual scenes
+        this.currentScene = 'cubeField';
+        this.scenes = {
+            cubeField: this.createCubeFieldScene.bind(this),
+            tunnelEffect: this.createTunnelScene.bind(this),
+            particleSystem: this.createParticleScene.bind(this)
+        };
+        
+        // Objects for current scene
+        this.objects = {};
+        
+        // Promise that resolves when THREE.js is available
+        this.threePromise = this.waitForTHREE();
+    }
+    
+    /**
+     * Wait for THREE.js to be available in global scope
+     */
+    waitForTHREE() {
+        return new Promise((resolve) => {
+            // Check if THREE is already available
+            if (typeof THREE !== 'undefined') {
+                resolve();
+                return;
+            }
+            
+            // Otherwise check every 100ms
+            const checkInterval = setInterval(() => {
+                if (typeof THREE !== 'undefined') {
+                    clearInterval(checkInterval);
+                    resolve();
+                }
+            }, 100);
+        });
+    }
+    
+    /**
+     * Initialize the WebGL renderer and basic scene
+     */
+    async init() {
+        if (this.isInitialized) return;
+        
+        // Wait for THREE.js to be available
+        await this.threePromise;
+        
+        try {
+            // Create renderer with better settings for visibility
+            this.renderer = new THREE.WebGLRenderer({ 
+                antialias: true,
+                alpha: false  // No transparency
+            });
+            this.renderer.setSize(window.innerWidth, window.innerHeight);
+            this.renderer.setPixelRatio(window.devicePixelRatio > 1 ? 2 : 1);
+            this.renderer.setClearColor(0x000000, 1); // Solid black background
+            
+            // Add renderer to container with improved positioning
+            this.renderer.domElement.style.position = 'absolute';
+            this.renderer.domElement.style.top = '0';
+            this.renderer.domElement.style.left = '0';
+            this.renderer.domElement.style.zIndex = '1'; // Make sure it's above the canvas
+            this.renderer.domElement.style.display = 'none'; // Hidden initially
+            this.container.parentNode.appendChild(this.renderer.domElement); // Attach to parent instead
+            
+            // Create camera
+            this.camera = new THREE.PerspectiveCamera(
+                75, window.innerWidth / window.innerHeight, 0.1, 1000
+            );
+            this.camera.position.z = 5;
+            
+            // Handle resize
+            window.addEventListener('resize', this.onResize.bind(this));
+            
+            // Set flag
+            this.isInitialized = true;
+            console.log('WebGL visualizations initialized');
+            
+            // Create initial scene
+            this.loadScene(this.currentScene);
+        } catch(err) {
+            console.error('Error initializing WebGL:', err);
+            // Hide the THREE.js error banner if it exists
+            const errorBanner = document.querySelector('.three-error');
+            if (errorBanner) {
+                errorBanner.style.display = 'none';
+            }
+        }
+    }
+    
+    /**
+     * Load a specific scene
+     * @param {string} sceneName - The name of the scene to load
+     */
+    loadScene(sceneName) {
+        if (!this.isInitialized) {
+            this.init().then(() => this.loadScene(sceneName));
+            return;
+        }
+        
+        // Check if the scene exists
+        if (!this.scenes[sceneName]) {
+            console.error(`Scene ${sceneName} does not exist`);
+            return;
+        }
+        
+        // Clean up previous scene
+        if (this.scene) {
+            this.disposeScene(this.scene);
+        }
+        
+        // Create new scene
+        this.scene = new THREE.Scene();
+        
+        // Reset objects
+        this.objects = {};
+        
+        // Call the scene creation function
+        this.scenes[sceneName]();
+        
+        // Update current scene
+        this.currentScene = sceneName;
+        
+        // Force a render to update the scene with current parameters
+        if (this.isActive) {
+            this.renderer.render(this.scene, this.camera);
+        }
+        
+        console.log(`Loaded WebGL scene: ${sceneName}`);
+    }
+    
+    /**
+     * Get the name of the current scene
+     * @returns {string} The current scene name
+     */
+    getCurrentScene() {
+        return this.currentScene;
+    }
+    
+    /**
+     * Dispose of a scene to prevent memory leaks
+     * @param {THREE.Scene} scene - The scene to dispose
+     */
+    disposeScene(scene) {
+        scene.traverse(object => {
+            if (object.geometry) {
+                object.geometry.dispose();
+            }
+            
+            if (object.material) {
+                if (Array.isArray(object.material)) {
+                    object.material.forEach(material => this.disposeMaterial(material));
+                } else {
+                    this.disposeMaterial(object.material);
+                }
+            }
+        });
+    }
+    
+    /**
+     * Dispose of a material to prevent memory leaks
+     * @param {THREE.Material} material - The material to dispose
+     */
+    disposeMaterial(material) {
+        if (material.map) material.map.dispose();
+        if (material.lightMap) material.lightMap.dispose();
+        if (material.aoMap) material.aoMap.dispose();
+        if (material.emissiveMap) material.emissiveMap.dispose();
+        if (material.bumpMap) material.bumpMap.dispose();
+        if (material.normalMap) material.normalMap.dispose();
+        if (material.displacementMap) material.displacementMap.dispose();
+        if (material.roughnessMap) material.roughnessMap.dispose();
+        if (material.metalnessMap) material.metalnessMap.dispose();
+        if (material.alphaMap) material.alphaMap.dispose();
+        if (material.envMap) material.envMap.dispose();
+        material.dispose();
+    }
+    
+    /**
+     * Convert HSV to RGB for THREE.js colors
+     * @param {number} h - Hue (0-1)
+     * @param {number} s - Saturation (0-1)
+     * @param {number} v - Value/Brightness (0-1)
+     * @returns {THREE.Color} - THREE.js color
+     */
+    hsvToThree(h, s, v) {
+        // Scale hue to 0-360
+        h = h * 360;
+        
+        // Calculation
+        const chroma = v * s;
+        const x = chroma * (1 - Math.abs(((h / 60) % 2) - 1));
+        const m = v - chroma;
+        
+        let r, g, b;
+        
+        if (h < 60) {
+            r = chroma; g = x; b = 0;
+        } else if (h < 120) {
+            r = x; g = chroma; b = 0;
+        } else if (h < 180) {
+            r = 0; g = chroma; b = x;
+        } else if (h < 240) {
+            r = 0; g = x; b = chroma;
+        } else if (h < 300) {
+            r = x; g = 0; b = chroma;
+        } else {
+            r = chroma; g = 0; b = x;
+        }
+        
+        return new THREE.Color(r + m, g + m, b + m);
+    }
+    
+    /**
+     * Map a parameter from 0-1 to a given range
+     * @param {number} value - Parameter value (0-1)
+     * @param {number} min - Minimum output value
+     * @param {number} max - Maximum output value
+     * @returns {number} - Mapped value
+     */
+    mapParam(value, min, max) {
+        return min + value * (max - min);
+    }
+    
+    /**
+     * Handle window resize
+     */
+    onResize() {
+        if (!this.isInitialized) return;
+        
+        this.camera.aspect = window.innerWidth / window.innerHeight;
+        this.camera.updateProjectionMatrix();
+        this.renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+    
+    /**
+     * Set a parameter value
+     * @param {string} paramName - Parameter name
+     * @param {number} value - Parameter value (0-1)
+     */
+    setParam(paramName, value) {
+        if (this.params.hasOwnProperty(paramName)) {
+            // Apply reactivity - blend between current and new value
+            const reactivity = this.params.reactivity;
+            this.params[paramName] = this.params[paramName] * (1 - reactivity) + value * reactivity;
+        }
+    }
+    
+    /**
+     * Start rendering the WebGL scene
+     */
+    start() {
+        if (!this.isInitialized) {
+            this.init().then(() => this.start());
+            return;
+        }
+        
+        if (this.isActive) return;
+        
+        // Make sure the 2D canvas is hidden
+        const canvas2D = document.getElementById('visualizer');
+        if (canvas2D) {
+            // Hide the 2D canvas completely
+            canvas2D.style.visibility = 'hidden';
+            canvas2D.style.display = 'none';
+        }
+        
+        // Show the WebGL renderer with proper styling
+        this.renderer.domElement.style.display = 'block';
+        this.renderer.domElement.style.visibility = 'visible';
+        this.renderer.domElement.style.zIndex = '5'; // Ensure it's on top
+        this.isActive = true;
+        this.lastTimeUpdated = performance.now();
+        
+        // Make sure WebGL canvas is visible before rendering
+        setTimeout(() => {
+            this.renderer.render(this.scene, this.camera);
+            this.animate();
+            console.log('WebGL visualization render forced and animation started');
+        }, 50);
+        
+        console.log('WebGL visualizations started, display:', this.renderer.domElement.style.display);
+    }
+    
+    /**
+     * Stop rendering the WebGL scene
+     */
+    stop() {
+        if (!this.isActive) return;
+        
+        this.isActive = false;
+        if (this.frameId) {
+            cancelAnimationFrame(this.frameId);
+            this.frameId = null;
+        }
+        
+        // Hide the renderer completely
+        this.renderer.domElement.style.display = 'none';
+        this.renderer.domElement.style.visibility = 'hidden';
+        
+        // Show the 2D canvas again
+        const canvas2D = document.getElementById('visualizer');
+        if (canvas2D) {
+            canvas2D.style.visibility = 'visible';
+            canvas2D.style.display = 'block';
+        }
+        
+        console.log('WebGL visualizations stopped');
+    }
+    
+    /**
+     * Animation loop
+     */
+    animate() {
+        if (!this.isActive) return;
+        
+        this.frameId = requestAnimationFrame(this.animate.bind(this));
+        
+        // Calculate delta time and update time counter
+        const now = performance.now();
+        const delta = (now - this.lastTimeUpdated) * 0.001; // Convert to seconds
+        this.lastTimeUpdated = now;
+        
+        // Update global time (scaled by speed)
+        this.time += delta * this.mapParam(this.params.speed, 0.2, 2);
+        
+        // Update scene objects
+        this.updateScene(delta);
+        
+        // Render scene
+        this.renderer.render(this.scene, this.camera);
+    }
+    
+    /**
+     * Update the current scene
+     * @param {number} delta - Time since last frame in seconds
+     */
+    updateScene(delta) {
+        if (!this.scene) return;
+        
+        // Common parameters
+        const rotationSpeed = this.mapParam(this.params.rotation, -0.5, 0.5) * delta;
+        
+        // Update camera zoom
+        this.camera.position.z = this.mapParam(this.params.zoom, 2, 10);
+        
+        // Scene-specific updates
+        switch (this.currentScene) {
+            case 'cubeField':
+                this.updateCubeFieldScene(delta);
+                break;
+            case 'tunnelEffect':
+                this.updateTunnelScene(delta);
+                break;
+            case 'particleSystem':
+                this.updateParticleScene(delta);
+                break;
+        }
+    }
+    
+    /**
+     * Create a field of animated cubes
+     */
+    createCubeFieldScene() {
+        // Base parameters
+        const cubeCount = Math.floor(this.mapParam(this.params.density, 50, 500));
+        const hue = this.params.hue;
+        const saturation = this.params.saturation;
+        const brightness = this.params.brightness;
+        
+        // Add stronger lighting for better visibility
+        const ambientLight = new THREE.AmbientLight(0x808080, 1.5);
+        this.scene.add(ambientLight);
+        
+        // Add directional light with increased intensity
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+        dirLight.position.set(5, 5, 5);
+        this.scene.add(dirLight);
+        
+        // Add a second directional light from another angle
+        const dirLight2 = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight2.position.set(-5, -2, 3);
+        this.scene.add(dirLight2);
+        
+        // Create cubes
+        const cubes = [];
+        const cubeSize = this.mapParam(this.params.size, 0.1, 0.5); // Larger size for visibility
+        const spread = this.mapParam(this.params.complexity, 5, 15);
+        
+        // Single geometry and materials for better performance
+        const geometry = new THREE.BoxGeometry(cubeSize, cubeSize, cubeSize);
+        const materials = [];
+        
+        // Create cubes with vibrant colors
+        for (let i = 0; i < cubeCount; i++) {
+            // Vary color slightly
+            const colorHue = (hue + i / cubeCount * 0.3) % 1;
+            const material = new THREE.MeshPhongMaterial({
+                color: this.hsvToThree(colorHue, saturation, brightness),
+                shininess: 80,
+                specular: new THREE.Color(0x888888), // Brighter specular highlights
+                emissive: this.hsvToThree(colorHue, saturation * 0.5, brightness * 0.2) // Add emissive for glow
+            });
+            materials.push(material);
+            
+            const cube = new THREE.Mesh(geometry, material);
+            
+            // Random position
+            cube.position.x = (Math.random() - 0.5) * spread;
+            cube.position.y = (Math.random() - 0.5) * spread;
+            cube.position.z = (Math.random() - 0.5) * spread;
+            
+            // Random rotation
+            cube.rotation.x = Math.random() * Math.PI * 2;
+            cube.rotation.y = Math.random() * Math.PI * 2;
+            cube.rotation.z = Math.random() * Math.PI * 2;
+            
+            // Store original properties for animation
+            cube.userData = {
+                originalPosition: cube.position.clone(),
+                rotationSpeed: {
+                    x: (Math.random() - 0.5) * 2,
+                    y: (Math.random() - 0.5) * 2,
+                    z: (Math.random() - 0.5) * 2
+                }
+            };
+            
+            this.scene.add(cube);
+            cubes.push(cube);
+        }
+        
+        // Create a subtle background with a grid
+        const gridHelper = new THREE.GridHelper(30, 30, 0x444444, 0x222222);
+        this.scene.add(gridHelper);
+        
+        // Store in objects
+        this.objects.cubes = cubes;
+        this.objects.geometry = geometry;
+        this.objects.materials = materials;
+        this.objects.gridHelper = gridHelper;
+    }
+    
+    /**
+     * Update the cube field scene
+     * @param {number} delta - Time since last frame in seconds
+     */
+    updateCubeFieldScene(delta) {
+        if (!this.objects.cubes) return;
+        
+        const cubes = this.objects.cubes;
+        const speed = this.mapParam(this.params.speed, 0.1, 2);
+        const hue = this.params.hue;
+        const saturation = this.params.saturation;
+        const brightness = this.params.brightness;
+        const waveScale = this.mapParam(this.params.complexity, 0.5, 3);
+        
+        // Rotate camera
+        this.scene.rotation.y += this.params.rotation * delta * 0.5;
+        
+        // Update each cube
+        cubes.forEach((cube, i) => {
+            // Update rotation
+            cube.rotation.x += cube.userData.rotationSpeed.x * delta * speed;
+            cube.rotation.y += cube.userData.rotationSpeed.y * delta * speed;
+            cube.rotation.z += cube.userData.rotationSpeed.z * delta * speed;
+            
+            // Update position with wave motion
+            const originalPos = cube.userData.originalPosition;
+            const timeOffset = this.time + i * 0.05;
+            const waveX = Math.sin(timeOffset) * waveScale;
+            const waveY = Math.cos(timeOffset * 0.7) * waveScale;
+            const waveZ = Math.sin(timeOffset * 0.3) * Math.cos(timeOffset * 0.5) * waveScale;
+            
+            cube.position.x = originalPos.x + waveX;
+            cube.position.y = originalPos.y + waveY;
+            cube.position.z = originalPos.z + waveZ;
+            
+            // Update color
+            const colorHue = (hue + i / cubes.length * 0.3) % 1;
+            if (this.objects.materials && this.objects.materials[i]) {
+                this.objects.materials[i].color = this.hsvToThree(colorHue, saturation, brightness);
+            }
+        });
+    }
+    
+    /**
+     * Create an endless tunnel effect with improved visibility
+     */
+    createTunnelScene() {
+        // Add stronger ambient light
+        const ambientLight = new THREE.AmbientLight(0x888888, 1.5);
+        this.scene.add(ambientLight);
+        
+        // Add point light at camera position
+        const pointLight = new THREE.PointLight(0xffffff, 2, 50);
+        pointLight.position.set(0, 0, 3);
+        this.scene.add(pointLight);
+        
+        // Parameters
+        const tunnelRadius = 5;
+        const tunnelLength = 30;
+        const segments = Math.max(6, Math.floor(this.mapParam(this.params.complexity, 8, 24)));
+        const rings = Math.floor(this.mapParam(this.params.density, 20, 100));
+        const hue = this.params.hue;
+        const saturation = this.params.saturation;
+        const brightness = this.params.brightness;
+        
+        // Create tunnel segments
+        const tunnelSegments = [];
+        const materials = [];
+        
+        // Add a background sphere for additional effect
+        const bgSphereGeometry = new THREE.SphereGeometry(40, 32, 32);
+        const bgSphereMaterial = new THREE.MeshBasicMaterial({
+            color: 0x000000,
+            side: THREE.BackSide,
+            wireframe: true,
+            transparent: true,
+            opacity: 0.3
+        });
+        const bgSphere = new THREE.Mesh(bgSphereGeometry, bgSphereMaterial);
+        this.scene.add(bgSphere);
+        this.objects.bgSphere = bgSphere;
+        
+        // Create a group to hold all rings
+        const tunnelGroup = new THREE.Group();
+        this.scene.add(tunnelGroup);
+        this.objects.tunnelGroup = tunnelGroup;
+        
+        try {
+            // Create rings with better visibility
+            for (let ring = 0; ring < rings; ring++) {
+                const z = ring * (tunnelLength / rings) - tunnelLength / 2;
+                const ringRadius = tunnelRadius * (1 + Math.sin(ring * 0.2) * 0.2);
+                
+                // Create a simple circle with segments
+                const geometry = new THREE.BufferGeometry();
+                const positions = [];
+                
+                // Create vertices in a circle
+                for (let i = 0; i <= segments; i++) {
+                    const angle = (i / segments) * Math.PI * 2;
+                    const x = Math.cos(angle) * ringRadius;
+                    const y = Math.sin(angle) * ringRadius;
+                    positions.push(x, y, 0);
+                }
+                
+                // Create lines connecting the vertices
+                const indices = [];
+                for (let i = 0; i < segments; i++) {
+                    indices.push(i, i + 1);
+                }
+                indices.push(segments, 0); // Close the loop
+                
+                // Set geometry attributes
+                geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+                geometry.setIndex(indices);
+                
+                // Move to the right z position
+                geometry.translate(0, 0, z);
+                
+                // Create material with varying color
+                const ringHue = (hue + ring / rings * 0.5) % 1;
+                const material = new THREE.LineBasicMaterial({
+                    color: this.hsvToThree(ringHue, saturation, brightness),
+                    linewidth: 2
+                });
+                materials.push(material);
+                
+                // Create the ring mesh as a line loop
+                const ring_obj = new THREE.LineLoop(geometry, material);
+                
+                ring_obj.userData = {
+                    originalZ: z,
+                    hueOffset: ring / rings * 0.5
+                };
+                
+                tunnelGroup.add(ring_obj);
+                tunnelSegments.push(ring_obj);
+            }
+            
+            // Also add some straight lines connecting the rings for a grid effect
+            const gridLines = 12; // Number of grid lines
+            for (let i = 0; i < gridLines; i++) {
+                const angle = (i / gridLines) * Math.PI * 2;
+                const x = Math.cos(angle) * tunnelRadius;
+                const y = Math.sin(angle) * tunnelRadius;
+                
+                // Create a line geometry
+                const lineGeometry = new THREE.BufferGeometry();
+                const positions = [
+                    x, y, -tunnelLength/2,  // Start point
+                    x, y, tunnelLength/2    // End point
+                ];
+                
+                lineGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+                
+                // Create material with hue based on angle
+                const lineHue = (hue + i / gridLines) % 1;
+                const material = new THREE.LineBasicMaterial({
+                    color: this.hsvToThree(lineHue, saturation * 0.8, brightness * 0.6),
+                    linewidth: 1,
+                    transparent: true,
+                    opacity: 0.5
+                });
+                
+                materials.push(material);
+                
+                // Create line and add to group
+                const line = new THREE.Line(lineGeometry, material);
+                tunnelGroup.add(line);
+                tunnelSegments.push(line);
+            }
+            
+            // Store objects 
+            this.objects.tunnelSegments = tunnelSegments;
+            this.objects.materials = materials;
+            
+        } catch (error) {
+            console.error("Error creating tunnel scene:", error);
+        }
+    }
+    
+    /**
+     * Update the tunnel effect scene
+     * @param {number} delta - Time since last frame in seconds
+     */
+    updateTunnelScene(delta) {
+        if (!this.objects.tunnelSegments) return;
+        
+        const tunnelSegments = this.objects.tunnelSegments;
+        const tunnelLength = 30;
+        const speed = this.mapParam(this.params.speed, 0.5, 5) * delta;
+        const rotation = this.mapParam(this.params.rotation, -1, 1);
+        const hue = this.params.hue;
+        const saturation = this.params.saturation;
+        const brightness = this.params.brightness;
+        
+        // Rotate the entire tunnel group for a global rotation effect
+        if (this.objects.tunnelGroup) {
+            this.objects.tunnelGroup.rotation.z += rotation * delta;
+        }
+        
+        // Update each tunnel segment
+        tunnelSegments.forEach((segment, i) => {
+            // Only move ring segments (not grid lines) along z-axis
+            if (segment.userData && segment.userData.originalZ !== undefined) {
+                // Get the original z position from userData
+                let z = segment.userData.originalZ + speed * this.time * 5;
+                
+                // Create a repeating motion by using modulo
+                z = z % tunnelLength - tunnelLength / 2;
+                
+                // Set new z position 
+                segment.position.z = z;
+                
+                // Update colors for rings with smooth transition
+                const ringHue = (hue + segment.userData.hueOffset + this.time * 0.1) % 1;
+                if (this.objects.materials && this.objects.materials[i]) {
+                    this.objects.materials[i].color = this.hsvToThree(ringHue, saturation, brightness);
+                }
+            }
+        });
+        
+        // Also update the background sphere rotation
+        if (this.objects.bgSphere) {
+            this.objects.bgSphere.rotation.x = this.time * 0.05;
+            this.objects.bgSphere.rotation.y = this.time * 0.1;
+        }
+    }
+    
+    /**
+     * Create a 3D particle system with enhanced visuals
+     */
+    createParticleScene() {
+        // Parameters
+        const particleCount = Math.floor(this.mapParam(this.params.density, 2000, 15000));
+        const particleSize = this.mapParam(this.params.size, 0.05, 0.3);
+        const spread = this.mapParam(this.params.complexity, 5, 15);
+        const hue = this.params.hue;
+        const saturation = this.params.saturation;
+        const brightness = this.params.brightness;
+        
+        // Create a particle texture for better visibility
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const size = 128;
+        canvas.width = size;
+        canvas.height = size;
+        
+        // Draw a soft circle with gradient
+        const gradient = ctx.createRadialGradient(
+            size/2, size/2, 0,
+            size/2, size/2, size/2
+        );
+        gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
+        gradient.addColorStop(0.3, 'rgba(255, 255, 255, 0.8)');
+        gradient.addColorStop(0.7, 'rgba(255, 255, 255, 0.3)');
+        gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, size, size);
+        
+        // Create texture from canvas
+        const texture = new THREE.CanvasTexture(canvas);
+        
+        // Create particle geometry
+        const geometry = new THREE.BufferGeometry();
+        const positions = new Float32Array(particleCount * 3); // x, y, z for each particle
+        const colors = new Float32Array(particleCount * 3); // r, g, b for each particle
+        const sizes = new Float32Array(particleCount); // Size variation
+        const velocities = []; // Store velocities in userData
+        
+        // Create particles with random positions, colors, sizes, and velocities
+        for (let i = 0; i < particleCount; i++) {
+            const i3 = i * 3;
+            
+            // Position - create a sphere volume distribution
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.acos(2 * Math.random() - 1);
+            const radius = Math.cbrt(Math.random()) * spread; // Cube root for uniform volume distribution
+            
+            positions[i3] = Math.sin(phi) * Math.cos(theta) * radius;
+            positions[i3 + 1] = Math.sin(phi) * Math.sin(theta) * radius;
+            positions[i3 + 2] = Math.cos(phi) * radius;
+            
+            // Color (vary based on position and distance from center)
+            const distanceRatio = radius / spread;
+            const particleHue = (hue + distanceRatio * 0.5) % 1;
+            const color = this.hsvToThree(particleHue, saturation, brightness);
+            colors[i3] = color.r;
+            colors[i3 + 1] = color.g;
+            colors[i3 + 2] = color.b;
+            
+            // Size variation - particles farther from center are larger
+            sizes[i] = particleSize * (0.5 + distanceRatio);
+            
+            // Velocity - spiral motion
+            const speed = 0.02 + Math.random() * 0.03;
+            velocities.push({
+                x: (Math.random() - 0.5) * speed,
+                y: (Math.random() - 0.5) * speed,
+                z: (Math.random() - 0.5) * speed,
+                // Add orbital component
+                orbit: Math.random() * Math.PI * 2,
+                orbitSpeed: (Math.random() * 0.5 + 0.5) * 0.01,
+                orbitRadius: radius * (0.1 + Math.random() * 0.2)
+            });
+        }
+        
+        // Set geometry attributes
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+        geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+        
+        // Create enhanced particle material
+        const material = new THREE.PointsMaterial({
+            size: particleSize,
+            vertexColors: true,
+            map: texture,
+            transparent: true,
+            opacity: 0.9,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            sizeAttenuation: true,
+            vertexColors: true
+        });
+        
+        // Create particle system
+        const particles = new THREE.Points(geometry, material);
+        this.scene.add(particles);
+        
+        // Add a dim point light at center for ambiance
+        const centerLight = new THREE.PointLight(
+            this.hsvToThree(hue, saturation * 0.7, brightness).getHex(),
+            0.8,
+            spread * 2
+        );
+        this.scene.add(centerLight);
+        
+        // Store in objects
+        this.objects.particles = particles;
+        this.objects.velocities = velocities;
+        this.objects.particleCount = particleCount;
+        this.objects.centerLight = centerLight;
+        this.objects.textureCanvas = canvas; // Store for possible updates
+    }
+    
+    /**
+     * Update the particle system scene with enhanced motion
+     * @param {number} delta - Time since last frame in seconds
+     */
+    updateParticleScene(delta) {
+        if (!this.objects.particles) return;
+        
+        const particles = this.objects.particles;
+        const velocities = this.objects.velocities;
+        const positions = particles.geometry.attributes.position.array;
+        const colors = particles.geometry.attributes.color.array;
+        const sizes = particles.geometry.attributes.size ? particles.geometry.attributes.size.array : null;
+        const particleCount = this.objects.particleCount;
+        const speed = this.mapParam(this.params.speed, 0.5, 3) * delta;
+        const spread = this.mapParam(this.params.complexity, 5, 15);
+        const hue = this.params.hue;
+        const saturation = this.params.saturation;
+        const brightness = this.params.brightness;
+        
+        // Rotate whole system
+        particles.rotation.y += this.params.rotation * delta * 0.2;
+        
+        // Update center light color
+        if (this.objects.centerLight) {
+            this.objects.centerLight.color = this.hsvToThree(
+                (hue + this.time * 0.1) % 1, 
+                saturation * 0.7, 
+                brightness
+            );
+        }
+        
+        // Update each particle
+        for (let i = 0; i < particleCount; i++) {
+            const i3 = i * 3;
+            const v = velocities[i];
+            
+            // Calculate current distance from center
+            const x = positions[i3];
+            const y = positions[i3 + 1];
+            const z = positions[i3 + 2];
+            const dist = Math.sqrt(x*x + y*y + z*z);
+            
+            // Update orbital motion
+            if (v.orbit !== undefined) {
+                v.orbit += v.orbitSpeed * speed * 5;
+                
+                // Apply orbital component based on current position
+                const orbitalInfluence = Math.min(1, dist / (spread * 0.5)); // More effect farther out
+                
+                // Create normalized direction vector from center
+                let nx = x / (dist || 1);
+                let ny = y / (dist || 1);
+                let nz = z / (dist || 1);
+                
+                // Create perpendicular vector for orbit
+                const px = -ny;
+                const py = nx;
+                const pz = 0; // Simplify by orbiting on XY plane
+                
+                // Add orbital motion to velocity
+                positions[i3] += (v.x + px * v.orbitRadius * orbitalInfluence * Math.cos(v.orbit)) * speed;
+                positions[i3 + 1] += (v.y + py * v.orbitRadius * orbitalInfluence * Math.sin(v.orbit)) * speed;
+                positions[i3 + 2] += (v.z + pz * v.orbitRadius * orbitalInfluence) * speed;
+            } else {
+                // Basic motion for particles without orbital component
+                positions[i3] += v.x * speed;
+                positions[i3 + 1] += v.y * speed;
+                positions[i3 + 2] += v.z * speed;
+            }
+            
+            // Apply gravitational pull toward/away from center based on time
+            const gravityDirection = Math.sin(this.time * 0.2) > 0 ? 1 : -1;
+            const gravity = gravityDirection * speed * 0.05;
+            
+            // Direction to/from center
+            const newX = positions[i3];
+            const newY = positions[i3 + 1];
+            const newZ = positions[i3 + 2];
+            const newDist = Math.sqrt(newX*newX + newY*newY + newZ*newZ);
+            
+            if (newDist > 0.1) { // Avoid division by zero
+                positions[i3] -= (newX / newDist) * gravity * newDist * 0.1;
+                positions[i3 + 1] -= (newY / newDist) * gravity * newDist * 0.1;
+                positions[i3 + 2] -= (newZ / newDist) * gravity * newDist * 0.1;
+            }
+            
+            // Boundary check with smooth reset
+            const maxDist = spread * 0.8;
+            if (newDist > maxDist) {
+                // Reset to random position closer to center
+                const resetDist = maxDist * 0.3;
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.acos(2 * Math.random() - 1);
+                positions[i3] = Math.sin(phi) * Math.cos(theta) * resetDist;
+                positions[i3 + 1] = Math.sin(phi) * Math.sin(theta) * resetDist;
+                positions[i3 + 2] = Math.cos(phi) * resetDist;
+                
+                // Randomize orbit
+                if (v.orbit !== undefined) {
+                    v.orbit = Math.random() * Math.PI * 2;
+                }
+            }
+            
+            // Update color based on position and time
+            const finalDist = Math.sqrt(
+                positions[i3]*positions[i3] + 
+                positions[i3+1]*positions[i3+1] + 
+                positions[i3+2]*positions[i3+2]
+            );
+            const distRatio = finalDist / spread;
+            
+            const particleHue = (hue + distRatio * 0.5 + this.time * 0.05) % 1;
+            const color = this.hsvToThree(
+                particleHue, 
+                Math.min(1, saturation * (0.7 + distRatio * 0.5)), 
+                Math.min(1, brightness * (0.7 + distRatio * 0.3))
+            );
+            colors[i3] = color.r;
+            colors[i3 + 1] = color.g;
+            colors[i3 + 2] = color.b;
+            
+            // Update size if we have a size attribute
+            if (sizes) {
+                // Pulse size with time and distance
+                const pulse = 0.8 + Math.sin(this.time * 2 + i * 0.1) * 0.2;
+                const sizeFactor = this.mapParam(this.params.size, 0.05, 0.3);
+                sizes[i] = sizeFactor * (0.3 + distRatio * 0.7) * pulse;
+            }
+        }
+        
+        // Set flags to update buffers
+        particles.geometry.attributes.position.needsUpdate = true;
+        particles.geometry.attributes.color.needsUpdate = true;
+        if (sizes) {
+            particles.geometry.attributes.size.needsUpdate = true;
+        }
+    }
+}

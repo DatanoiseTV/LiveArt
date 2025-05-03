@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LiveArt - Web VJ Tool</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="container">
+        <canvas id="visualizer"></canvas>
+        
+        <div class="controls">
+            <div class="midi-status">
+                <div id="midi-indicator" class="indicator"></div>
+                <span>MIDI</span>
+            </div>
+            <div class="midi-port-selector">
+                <label for="midi-input">MIDI Input:</label>
+                <select id="midi-input">
+                    <option value="">No MIDI inputs available</option>
+                </select>
+            </div>
+            <div class="preset-selector">
+                <label for="visual-preset">Visual:</label>
+                <select id="visual-preset">
+                    <option value="particles">Particles</option>
+                    <option value="waves">Waves</option>
+                    <option value="grid">Grid</option>
+                    <option value="fractals">Fractals</option>
+                    <option value="audioReactive">Audio Reactive</option>
+                    <option value="fluidDynamics">Fluid Dynamics</option>
+                    <option value="neonGrid">Neon Grid</option>
+                    <option value="galaxies">Galaxies</option>
+                    <!-- WebGL 3D Visualizations -->
+                    <option value="webgl-cubeField">3D Cube Field</option>
+                    <option value="webgl-tunnelEffect">3D Tunnel</option>
+                    <option value="webgl-particleSystem">3D Particles</option>
+                </select>
+            </div>
+            <div class="preset-controls">
+                <button id="save-preset" title="Save current settings as preset">Save</button>
+                <select id="user-presets">
+                    <option value="">User Presets</option>
+                </select>
+                <button id="load-preset" title="Load selected preset">Load</button>
+            </div>
+            <div class="fps-counter">FPS: <span id="fps">0</span></div>
+            <div class="help-toggle">
+                <button id="help-button" title="Show MIDI Mappings">?</button>
+            </div>
+        </div>
+        
+        <div class="show-controls-button">⚙️</div>
+        
+        <!-- Help Panel with MIDI Mappings -->
+        <div id="help-panel" class="help-panel">
+            <div class="help-panel-header">
+                <h2>MIDI CC Mappings</h2>
+                <button id="close-help">×</button>
+            </div>
+            
+            <div class="help-panel-content">
+                <div class="mapping-table-container">
+                    <table id="midi-mapping-table" class="mapping-table">
+                        <thead>
+                            <tr>
+                                <th>Parameter</th>
+                                <th>CC#</th>
+                                <th>Value</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Table will be populated by JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div class="help-panel-footer">
+                    <div class="midi-learn-controls">
+                        <div id="learn-status">Click "Learn" and move a controller to map it</div>
+                        <button id="cancel-learn" class="hidden">Cancel</button>
+                    </div>
+                    <div class="keyboard-shortcuts">
+                        <h3>Keyboard Shortcuts</h3>
+                        <ul>
+                            <li><kbd>1</kbd>-<kbd>9</kbd>: Increase parameters</li>
+                            <li><kbd>Shift</kbd>+<kbd>1</kbd>-<kbd>9</kbd>: Decrease parameters</li>
+                            <li><kbd>Space</kbd>: Randomize parameters</li>
+                            <li><kbd>→</kbd> / <kbd>←</kbd>: Change preset</li>
+                            <li><kbd>F</kbd>: Fullscreen</li>
+                            <li><kbd>H</kbd>: Hide controls</li>
+                            <li><kbd>M</kbd>: Show/hide MIDI mappings</li>
+                            <li><kbd>L</kbd>: Toggle Live Mode (hide all UI)</li>
+                        </ul>
+                        <br>
+                        <p>Your settings are automatically saved and restored when you reopen the app. You can also save named presets with the Save/Load buttons.</p>
+                    </div>
+                    
+                    <div class="program-changes">
+                        <h3>MIDI Program Changes</h3>
+                        <table>
+                            <tr>
+                                <th>Program #</th>
+                                <th>Visual</th>
+                            </tr>
+                            <tr><td>0</td><td>Particles</td></tr>
+                            <tr><td>1</td><td>Waves</td></tr>
+                            <tr><td>2</td><td>Grid</td></tr>
+                            <tr><td>3</td><td>Fractals</td></tr>
+                            <tr><td>4</td><td>Audio Reactive</td></tr>
+                            <tr><td>5</td><td>Fluid Dynamics</td></tr>
+                            <tr><td>6</td><td>Neon Grid</td></tr>
+                            <tr><td>7</td><td>Galaxies</td></tr>
+                            <tr><td>8</td><td>3D Cube Field (beta)</td></tr>
+                            <tr><td>9</td><td>3D Tunnel (beta)</td></tr>
+                            <tr><td>10</td><td>3D Particles (beta)</td></tr>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Three.js for 3D WebGL graphics -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js"></script>
+    
+    <script src="js/midi.js"></script>
+    <script src="js/visuals.js"></script>
+    <script src="js/webgl.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>

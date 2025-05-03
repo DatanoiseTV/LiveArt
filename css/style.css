@@ -1,0 +1,466 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    background-color: #000;
+    color: #fff;
+    font-family: 'Arial', sans-serif;
+    overflow: hidden;
+}
+
+.container {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+}
+
+canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+}
+
+.controls {
+    position: absolute;
+    bottom: 20px;
+    left: 20px;
+    background-color: rgba(0, 0, 0, 0.8);
+    padding: 15px 20px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    z-index: 10;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    transition: opacity 0.3s ease;
+}
+
+.controls.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.midi-status {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.indicator {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background-color: #f00;
+    transition: transform 0.1s ease, background-color 0.3s ease;
+}
+
+.indicator.connected {
+    background-color: #0f0;
+}
+
+.indicator.pulse {
+    transform: scale(1.5);
+    opacity: 0.8;
+}
+
+@keyframes pulse {
+    0% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.5); opacity: 0.7; }
+    100% { transform: scale(1); opacity: 1; }
+}
+
+.preset-selector,
+.midi-port-selector,
+.preset-controls {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+/* MIDI rescan button */
+.rescan-midi-button {
+    background-color: #444;
+    color: #fff;
+    border: none;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    font-weight: bold;
+    cursor: pointer;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.2s, transform 0.2s;
+}
+
+.rescan-midi-button:hover {
+    background-color: #666;
+    transform: rotate(90deg);
+}
+
+select {
+    background-color: #333;
+    color: #fff;
+    border: none;
+    padding: 5px 10px;
+    border-radius: 4px;
+    font-size: 0.95em;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+select:focus {
+    outline: none;
+    border-color: rgba(255, 255, 255, 0.3);
+}
+
+.preset-controls button {
+    background-color: #444;
+    color: #fff;
+    border: none;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.9em;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.preset-controls button:hover {
+    background-color: #666;
+}
+
+.preset-controls #save-preset {
+    background-color: #1E88E5;
+}
+
+.preset-controls #save-preset:hover {
+    background-color: #1976D2;
+}
+
+.preset-controls #load-preset {
+    background-color: #43A047;
+}
+
+.preset-controls #load-preset:hover {
+    background-color: #388E3C;
+}
+
+.fps-counter {
+    font-size: 0.9em;
+    opacity: 0.8;
+    margin-left: auto;
+}
+
+.show-controls-button {
+    position: absolute;
+    bottom: 20px;
+    left: 20px;
+    width: 40px;
+    height: 40px;
+    background-color: rgba(0, 0, 0, 0.8);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 9;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+}
+
+.controls.hidden + .show-controls-button {
+    opacity: 1;
+}
+
+/* Help button */
+.help-toggle button {
+    background-color: #444;
+    color: #fff;
+    border: none;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    font-weight: bold;
+    cursor: pointer;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.2s ease;
+}
+
+.help-toggle button:hover {
+    background-color: #666;
+}
+
+/* Help panel */
+.help-panel {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 80%;
+    max-width: 600px;
+    max-height: 80vh;
+    background-color: rgba(0, 0, 0, 0.9);
+    backdrop-filter: blur(15px);
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    z-index: 100;
+    display: none;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+}
+
+.help-panel.active {
+    display: flex;
+}
+
+.help-panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px 20px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.help-panel-header h2 {
+    font-size: 1.2rem;
+    margin: 0;
+}
+
+.help-panel-header button {
+    background: none;
+    border: none;
+    color: #fff;
+    font-size: 1.5rem;
+    cursor: pointer;
+    opacity: 0.7;
+    transition: opacity 0.2s;
+}
+
+.help-panel-header button:hover {
+    opacity: 1;
+}
+
+.help-panel-content {
+    padding: 20px;
+    overflow-y: auto;
+    max-height: calc(80vh - 60px);
+}
+
+.mapping-table-container {
+    overflow-x: auto;
+    margin-bottom: 20px;
+}
+
+.mapping-table {
+    width: 100%;
+    border-collapse: collapse;
+    text-align: left;
+}
+
+.mapping-table th, .mapping-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.mapping-table th {
+    font-weight: bold;
+    color: #ccc;
+    font-size: 0.9em;
+}
+
+.mapping-table td {
+    font-size: 0.9em;
+}
+
+.mapping-table tr:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+.parameter-value {
+    display: flex;
+    align-items: center;
+}
+
+.value-bar {
+    flex-grow: 1;
+    height: 6px;
+    background-color: #333;
+    border-radius: 3px;
+    overflow: hidden;
+    position: relative;
+    margin-right: 10px;
+}
+
+.value-fill {
+    height: 100%;
+    background-color: #4CAF50;
+    width: 0%;
+    transition: width 0.2s;
+}
+
+.value-text {
+    min-width: 40px;
+    text-align: right;
+}
+
+/* MIDI learn interface */
+.learn-button, #cancel-learn {
+    background-color: #1E88E5;
+    color: white;
+    border: none;
+    padding: 5px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8em;
+    transition: background-color 0.2s;
+}
+
+.learn-button:hover {
+    background-color: #1976D2;
+}
+
+.learn-button.learning {
+    background-color: #F44336;
+    animation: pulse-bg 1.5s infinite;
+}
+
+#cancel-learn {
+    background-color: #555;
+    margin-left: 10px;
+}
+
+#cancel-learn:hover {
+    background-color: #777;
+}
+
+.midi-learn-controls {
+    display: flex;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+#learn-status {
+    font-size: 0.9em;
+    color: #ccc;
+    margin-right: 10px;
+}
+
+.hidden {
+    display: none !important;
+}
+
+@keyframes pulse-bg {
+    0% { background-color: #F44336; }
+    50% { background-color: #B71C1C; }
+    100% { background-color: #F44336; }
+}
+
+/* Keyboard shortcuts */
+.keyboard-shortcuts {
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    padding-top: 15px;
+    margin-bottom: 15px;
+}
+
+.keyboard-shortcuts h3 {
+    font-size: 1rem;
+    margin-bottom: 10px;
+    color: #ccc;
+}
+
+.keyboard-shortcuts ul {
+    list-style: none;
+    padding: 0;
+}
+
+.keyboard-shortcuts li {
+    margin-bottom: 8px;
+    font-size: 0.9em;
+    color: #aaa;
+}
+
+kbd {
+    background-color: #333;
+    border-radius: 3px;
+    border: 1px solid #555;
+    box-shadow: 0 2px 0 #222;
+    color: #fff;
+    display: inline-block;
+    font-size: 0.85em;
+    font-family: monospace;
+    padding: 1px 6px;
+    margin: 0 2px;
+}
+
+/* Program changes table */
+.program-changes {
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    padding-top: 15px;
+}
+
+.program-changes h3 {
+    font-size: 1rem;
+    margin-bottom: 10px;
+    color: #ccc;
+}
+
+.program-changes table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9em;
+}
+
+.program-changes th {
+    text-align: left;
+    color: #aaa;
+    font-weight: normal;
+    padding: 5px 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.program-changes td {
+    padding: 5px 10px;
+    color: #ccc;
+}
+
+.program-changes tr:nth-child(odd) {
+    background-color: rgba(255, 255, 255, 0.03);
+}
+
+/* Live Mode Styles */
+.container.live-mode {
+    cursor: none; /* Hide cursor in live mode */
+}
+
+.live-mode-indicator {
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    background-color: rgba(255, 0, 0, 0.7);
+    color: white;
+    padding: 5px 10px;
+    border-radius: 4px;
+    font-size: 0.9em;
+    font-weight: bold;
+    z-index: 9999;
+    animation: fade-out 2s forwards;
+    pointer-events: none;
+}
+
+@keyframes fade-out {
+    0% { opacity: 1; }
+    70% { opacity: 1; }
+    100% { opacity: 0; }
+}
