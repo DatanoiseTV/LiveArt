@@ -83,6 +83,25 @@ canvas {
     gap: 5px;
 }
 
+.preset-nav-button {
+    background-color: #444;
+    color: #fff;
+    border: none;
+    width: 28px;
+    height: 28px;
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.2s;
+    font-size: 12px;
+}
+
+.preset-nav-button:hover {
+    background-color: #666;
+}
+
 /* MIDI rescan button */
 .rescan-midi-button {
     background-color: #444;

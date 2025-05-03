@@ -255,6 +255,26 @@ document.addEventListener('DOMContentLoaded', () => {
     // Load any saved user presets
     loadUserPresets();
     
+    // Set up preset navigation buttons
+    const nextPresetButton = document.getElementById('next-preset');
+    const prevPresetButton = document.getElementById('prev-preset');
+    
+    if (nextPresetButton) {
+        nextPresetButton.addEventListener('click', () => {
+            nextPreset();
+            // Save settings after changing preset
+            setTimeout(saveCurrentSettings, 500);
+        });
+    }
+    
+    if (prevPresetButton) {
+        prevPresetButton.addEventListener('click', () => {
+            prevPreset();
+            // Save settings after changing preset
+            setTimeout(saveCurrentSettings, 500);
+        });
+    }
+    
     // UI Controls visibility toggle
     const container = document.querySelector('.container');
     const controls = document.querySelector('.controls');
@@ -695,6 +715,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 rotation: 0.1,      // Original rotation
                 zoom: 0.5,
                 reactivity: 0.7
+            },
+            'webgl-trailParticles': {
+                hue: 0.7,           // Purple-blue
+                saturation: 0.9,
+                brightness: 0.95,
+                density: 0.6,       // Controls number of particles
+                speed: 0.3,         // Animation speed
+                size: 0.5,          // Base size parameter
+                complexity: 0.6,    // Visual complexity
+                rotation: 0.05,     // Slow rotation
+                zoom: 0.8,          // Camera zoom
+                reactivity: 0.8     // High reactivity
             }
         };
         
@@ -737,6 +769,13 @@ document.addEventListener('DOMContentLoaded', () => {
         22: { param: 'rotationX', name: '3D Rotate X', min: -Math.PI, max: Math.PI },
         23: { param: 'rotationY', name: '3D Rotate Y', min: -Math.PI, max: Math.PI },
         24: { param: 'translationZ', name: '3D Translate Z', min: -10, max: 10 },
+        
+        // Trail particles controls
+        35: { param: 'particleX', name: 'Particle X Position' },
+        36: { param: 'particleY', name: 'Particle Y Position' },
+        37: { param: 'particleSize', name: 'Particle Size' },
+        38: { param: 'particleBrightness', name: 'Particle Brightness' },
+        39: { param: 'trailLength', name: 'Trail Length' },
         
         // 3D Post-processing effects
         25: { param: 'glitchIntensity', name: 'Glitch Effect' },
@@ -784,6 +823,13 @@ document.addEventListener('DOMContentLoaded', () => {
         { param: 'rotationX', name: '3D Rotate X', min: -Math.PI, max: Math.PI },
         { param: 'rotationY', name: '3D Rotate Y', min: -Math.PI, max: Math.PI },
         { param: 'translationZ', name: '3D Translate Z', min: -10, max: 10 },
+        
+        // Trail particle parameters
+        { param: 'particleX', name: 'Particle X Position' },
+        { param: 'particleY', name: 'Particle Y Position' },
+        { param: 'particleSize', name: 'Particle Size' },
+        { param: 'particleBrightness', name: 'Particle Brightness' },
+        { param: 'trailLength', name: 'Trail Length' },
         
         // WebGL/3D Post-processing effects
         { param: 'glitchIntensity', name: 'Glitch Effect' },
@@ -1019,6 +1065,17 @@ document.addEventListener('DOMContentLoaded', () => {
         let nextIndex = (currentIndex + 1) % options.length;
         
         presetSelect.selectedIndex = nextIndex;
+        presetSelect.dispatchEvent(new Event('change'));
+    }
+    
+    // Function to go to previous preset
+    function prevPreset() {
+        const presetSelect = document.getElementById('visual-preset');
+        const options = presetSelect.options;
+        let currentIndex = presetSelect.selectedIndex;
+        let prevIndex = (currentIndex - 1 + options.length) % options.length;
+        
+        presetSelect.selectedIndex = prevIndex;
         presetSelect.dispatchEvent(new Event('change'));
     }
     
