@@ -171,6 +171,9 @@ class VisualEngine {
             
             // Apply post-processing effects
             this.applyPostProcessing();
+            
+            // Debug logging for effects
+            console.log('Applied 2D post-processing effects');
         } else {
             // Standard rendering without effects
             this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
@@ -278,10 +281,24 @@ class VisualEngine {
      * Apply post-processing effects to the rendered scene
      */
     applyPostProcessing() {
-        if (!this.effectsEnabled) return;
+        if (!this.effectsEnabled) {
+            console.log('Effects are disabled, skipping post-processing');
+            return;
+        }
         
         // Cache params for easier access
         const { glitchIntensity, chromaticAberration, pixelate, vignette, bloom, feedbackAmount } = this.effectParams;
+        
+        // Debug what effects are enabled
+        console.log('2D Effects status:', {
+            enabled: this.effectsEnabled,
+            bloom: bloom > 0 ? `${bloom.toFixed(2)}` : 'off',
+            chromatic: chromaticAberration > 0 ? `${chromaticAberration.toFixed(2)}` : 'off',
+            pixelate: pixelate > 0 ? `${pixelate.toFixed(2)}` : 'off',
+            vignette: vignette > 0 ? `${vignette.toFixed(2)}` : 'off',
+            glitch: glitchIntensity > 0 ? `${glitchIntensity.toFixed(2)}` : 'off',
+            feedback: feedbackAmount > 0 ? `${feedbackAmount.toFixed(2)}` : 'off',
+        });
         
         // Use main buffer if any effects are active
         if (glitchIntensity > 0 || chromaticAberration > 0 || pixelate > 0 || 

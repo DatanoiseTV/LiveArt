@@ -348,9 +348,17 @@ class WebGLVisuals {
                 return;
             }
             
-            // Apply reactivity to the target value
-            const reactivity = this.params.reactivity;
-            this.targetParams[paramName] = this.targetParams[paramName] * (1 - reactivity) + value * reactivity;
+            // Core parameters like brightness should be reflected immediately in the UI
+            // even while smoothly interpolating in the actual rendering
+            if (paramName === 'brightness' || paramName === 'hue' || paramName === 'saturation') {
+                // Update immediately for UI responsiveness
+                this.params[paramName] = value;
+                this.targetParams[paramName] = value;
+            } else {
+                // Apply reactivity to the target value for all other parameters
+                const reactivity = this.params.reactivity;
+                this.targetParams[paramName] = this.targetParams[paramName] * (1 - reactivity) + value * reactivity;
+            }
         }
         
         // Handle 3D transformation parameters
@@ -585,7 +593,20 @@ class WebGLVisuals {
      * Update post-processing effects
      */
     updateEffects() {
-        if (!this.effectsEnabled || !this.composer) return;
+        if (!this.effectsEnabled || !this.composer) {
+            console.log('Effects disabled or composer not initialized');
+            return;
+        }
+        
+        // Debug what effects are currently set to
+        console.log('3D Effects status:', {
+            enabled: this.effectsEnabled,
+            bloomStrength: this.effectParams.bloomStrength > 0 ? `${this.effectParams.bloomStrength.toFixed(2)}` : 'off',
+            bloomRadius: this.effectParams.bloomRadius > 0 ? `${this.effectParams.bloomRadius.toFixed(2)}` : 'off',
+            glitchIntensity: this.effectParams.glitchIntensity > 0 ? `${this.effectParams.glitchIntensity.toFixed(2)}` : 'off',
+            rgbShift: this.effectParams.rgbShiftAmount > 0 ? `${this.effectParams.rgbShiftAmount.toFixed(2)}` : 'off',
+            vignette: this.effectParams.vignetteAmount > 0 ? `${this.effectParams.vignetteAmount.toFixed(2)}` : 'off'
+        });
         
         // Update Glitch effect
         if (this.glitchPass) {
@@ -683,12 +704,36 @@ class WebGLVisuals {
                 this.updateScene(delta);
             }
             
-            // Update post-processing effects
-            this.updateEffects();
+            // Update post-processing effects - check if we need to initialize effects
+            if (this.effectsEnabled && (!this.composer || this.composer.passes.length <= 1)) {
+                console.log('Effects were enabled but composer not initialized, initializing now');
+                this.initPostProcessing();
+            }
+            
+            // Always update effects if they're enabled
+            if (this.effectsEnabled) {
+                this.updateEffects();
+            }
             
             // Render scene (with or without effects)
             if (this.effectsEnabled && this.composer && this.scene) {
                 try {
+                    // Make sure at least one pass is active
+                    let anyPassEnabled = false;
+                    for (let i = 0; i < this.composer.passes.length; i++) {
+                        if (this.composer.passes[i].enabled) {
+                            anyPassEnabled = true;
+                            break;
+                        }
+                    }
+                    
+                    // If no passes are active, enable the bloom pass as default
+                    if (!anyPassEnabled && this.bloomPass) {
+                        console.log('No active passes found, enabling bloom as default');
+                        this.bloomPass.enabled = true;
+                        this.bloomPass.strength = 0.5;
+                    }
+                    
                     this.composer.render(delta);
                 } catch (e) {
                     console.warn("Composer render error:", e);

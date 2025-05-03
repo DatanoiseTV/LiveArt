@@ -1457,10 +1457,36 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // E key to toggle effects
         if (e.key.toLowerCase() === 'e') {
+            // Check current effects status
+            console.log('Current effects status:');
+            console.log('- 2D engine effects enabled:', visualEngine.effectsEnabled);
+            console.log('- 2D effect params:', visualEngine.effectParams);
+            console.log('- 3D engine effects enabled:', webglEngine.effectsEnabled);
+            console.log('- 3D effect params:', webglEngine.effectParams);
+            
             // Toggle effects in the active engine
             if (isWebGL) {
                 webglEngine.effectsEnabled = !webglEngine.effectsEnabled;
                 console.log(`3D Effects: ${webglEngine.effectsEnabled ? 'Enabled' : 'Disabled'}`);
+                
+                // Initialize some effect values if effects are enabled
+                if (webglEngine.effectsEnabled) {
+                    // Set default effect values if all at zero
+                    let hasNonZeroEffect = false;
+                    for (const key in webglEngine.effectParams) {
+                        if (webglEngine.effectParams[key] > 0) {
+                            hasNonZeroEffect = true;
+                            break;
+                        }
+                    }
+                    
+                    if (!hasNonZeroEffect) {
+                        console.log('Setting default effect values for 3D');
+                        webglEngine.effectParams.bloomStrength = 0.5;
+                        webglEngine.effectParams.bloomRadius = 0.3;
+                        webglEngine.effectParams.vignetteAmount = 0.3;
+                    }
+                }
                 
                 // Show visual confirmation
                 const notification = document.createElement('div');
@@ -1473,6 +1499,25 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 visualEngine.effectsEnabled = !visualEngine.effectsEnabled;
                 console.log(`2D Effects: ${visualEngine.effectsEnabled ? 'Enabled' : 'Disabled'}`);
+                
+                // Initialize some effect values if effects are enabled
+                if (visualEngine.effectsEnabled) {
+                    // Set default effect values if all at zero
+                    let hasNonZeroEffect = false;
+                    for (const key in visualEngine.effectParams) {
+                        if (visualEngine.effectParams[key] > 0) {
+                            hasNonZeroEffect = true;
+                            break;
+                        }
+                    }
+                    
+                    if (!hasNonZeroEffect) {
+                        console.log('Setting default effect values for 2D');
+                        visualEngine.effectParams.bloom = 0.4;
+                        visualEngine.effectParams.vignette = 0.3;
+                        visualEngine.effectParams.chromaticAberration = 0.2;
+                    }
+                }
                 
                 // Show visual confirmation
                 const notification = document.createElement('div');
