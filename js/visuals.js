@@ -79,9 +79,10 @@ class VisualEngine {
             tentacles: this.renderTentacles.bind(this),
             circuitBoard: this.renderCircuitBoard.bind(this),
             pixelFlow: this.renderPixelFlow.bind(this),
-            // Oscilloscope visualization
+            // Oscilloscope visualizations
             oscilloscope: this.renderOscilloscope.bind(this),
-            'webgl-crtOscilloscope': this.renderOscilloscope.bind(this)
+            'webgl-crtOscilloscope': this.renderOscilloscope.bind(this),
+            'oscilloscope-stereo': this.renderStereoOscilloscope.bind(this)
         };
         
         // We'll initialize visualization specific state after all methods are defined
@@ -1817,14 +1818,43 @@ class VisualEngine {
             initialized: false,
             persistenceCanvas: null,
             persistenceCtx: null,
-            persistence: 0.65, // Lower base phosphor persistence for more authentic fade (0-1)
-            traceHue: 0.33, // Green phosphor
-            lastFrameTime: 0,
-            traceHistory: [], // Store previous trace points for ghosting
-            historyLength: 2, // Reduced history for less intense persistence
+            // Multiple canvases for multi-stage phosphor decay
+            persistenceCanvasLong: null,  // For very long persistence effects
+            persistenceCtxLong: null,
             // Phosphor characteristics
-            phosphorIntensity: 0.7, // Base intensity of the phosphor glow
-            phosphorFadeExponent: 1.8 // How non-linear the phosphor fade is (higher = faster initial fade, longer tail)
+            phosphorType: 'p7',           // Default phosphor type (p1, p7, p31)
+            // Decay time constants in milliseconds - realistic values based on actual CRT phosphors
+            decayConstants: {
+                // Fast decay - initial bright glow (ms)
+                p1: { fast: 50, medium: 200, slow: 500, veryLong: 1200 },
+                p7: { fast: 60, medium: 300, slow: 1500, veryLong: 5000 }, // Blue-to-yellow dual phosphor
+                p31: { fast: 35, medium: 100, slow: 250, veryLong: 600 }   // Fast decay green phosphor
+            },
+            // Phosphor colors during decay phases
+            phosphorColors: {
+                p1: {
+                    initial: { r: 0, g: 255, b: 180 }, // Green-yellow P1
+                    afterglow: { r: 0, g: 230, b: 150 }
+                },
+                p7: {
+                    initial: { r: 100, g: 180, b: 255 }, // Blue P7 (initial)
+                    afterglow: { r: 180, g: 190, b: 140 }  // Yellow-white (afterglow)
+                },
+                p31: {
+                    initial: { r: 30, g: 255, b: 120 }, // Bright green P31
+                    afterglow: { r: 10, g: 220, b: 80 }
+                }
+            },
+            lastFrameTime: 0,
+            traceHistory: [], // Store previous trace points for processing
+            historyLength: 3, // Number of frames to store for processing
+            // Electron beam characteristics
+            beamIntensity: 0.85, // Base intensity of the electron beam
+            beamSharpness: 0.8,  // Focus of the beam (0-1, higher = sharper)
+            beamSize: 1.0,       // Size multiplier for the beam
+            // Screen characteristics
+            screenCurvature: 0.03, // Subtle curvature effect for screen
+            graininess: 0.015     // Phosphor grain/noise amount
         };
         
         // Map of visual names to their index for program change
@@ -2616,68 +2646,405 @@ class VisualEngine {
             }
         }
         
-        // Create persistence canvas for phosphor trail effect
+        // Create main persistence canvas for primary phosphor effect (faster decay)
         const persistenceCanvas = document.createElement('canvas');
         persistenceCanvas.width = this.width;
         persistenceCanvas.height = this.height;
-        const persistenceCtx = persistenceCanvas.getContext('2d');
+        const persistenceCtx = persistenceCanvas.getContext('2d', {
+            willReadFrequently: false, // Optimization
+            alpha: true
+        });
+        
+        // Enable image smoothing for realistic phosphor bloom
+        persistenceCtx.imageSmoothingEnabled = true;
+        persistenceCtx.imageSmoothingQuality = 'high';
         
         // Clear the persistence canvas
         persistenceCtx.fillStyle = 'rgba(0, 0, 0, 1)';
         persistenceCtx.fillRect(0, 0, this.width, this.height);
         
+        // Create secondary persistence canvas for long-lasting phosphor afterglow
+        // This is particularly important for P7 phosphor which has a long-lasting yellow afterglow
+        const persistenceCanvasLong = document.createElement('canvas');
+        persistenceCanvasLong.width = this.width;
+        persistenceCanvasLong.height = this.height;
+        const persistenceCtxLong = persistenceCanvasLong.getContext('2d', {
+            willReadFrequently: false,
+            alpha: true
+        });
+        
+        persistenceCtxLong.imageSmoothingEnabled = true;
+        persistenceCtxLong.imageSmoothingQuality = 'medium'; // Lower quality for afterglow is fine
+        
+        // Clear the long persistence canvas
+        persistenceCtxLong.fillStyle = 'rgba(0, 0, 0, 1)';
+        persistenceCtxLong.fillRect(0, 0, this.width, this.height);
+        
         // Store in our buffers object
         this.oscilloscopeBuffers.persistenceCanvas = persistenceCanvas;
         this.oscilloscopeBuffers.persistenceCtx = persistenceCtx;
+        this.oscilloscopeBuffers.persistenceCanvasLong = persistenceCanvasLong;
+        this.oscilloscopeBuffers.persistenceCtxLong = persistenceCtxLong;
         this.oscilloscopeBuffers.lastFrameTime = performance.now();
         this.oscilloscopeBuffers.initialized = true;
         
         // Reset trace history
         this.oscilloscopeBuffers.traceHistory = [];
+        
+        // Create a lookup table for fast exponential decay calculation
+        // This improves performance when calculating per-pixel decay
+        this._createDecayLUT();
     }
     
     /**
-     * Apply phosphor fade to the persistence buffer with authentic CRT characteristics
+     * Create lookup tables for phosphor decay calculations
+     * This improves performance by pre-computing exponential decay values
      */
-    fadePhosphorBuffer(deltaTime) {
-        if (!this.oscilloscopeBuffers.initialized) return;
+    _createDecayLUT() {
+        // Create decay lookup tables for performance optimization
+        const decayLUT = {};
+        const LUT_SIZE = 1000; // Resolution of the lookup table
         
-        const ctx = this.oscilloscopeBuffers.persistenceCtx;
-        
-        // Get phosphor characteristics
-        const persistence = this.oscilloscopeBuffers.persistence;
-        const fadeExponent = this.oscilloscopeBuffers.phosphorFadeExponent;
-        
-        // Calculate non-linear fade amount based on deltaTime and persistence factors
-        // Real CRT phosphors have a non-linear decay - fast initial fade, then a longer tail
-        // Higher fadeExponent = faster initial fade but longer persistent tail
-        
-        // Baseline fade speed based on persistence value (lower persistence = faster fade)
-        const baseFadeSpeed = 1.0 - persistence;
-        
-        // Apply non-linear fade curve using the exponent
-        // This creates a more natural phosphor-like decay
-        const fadeAmount = 1.0 - Math.pow(persistence, deltaTime * 20 * Math.pow(baseFadeSpeed, 1/fadeExponent));
-        
-        // Apply fade by drawing a semi-transparent black rectangle
-        // Use a very subtle green tint in the fade for more authentic look
-        // Real phosphors don't fade to pure black immediately
-        ctx.fillStyle = `rgba(0, ${Math.floor(fadeAmount * 3)}, 0, ${fadeAmount})`;
-        ctx.fillRect(0, 0, this.width, this.height);
-        
-        // For a more authentic analog look, we'll add a subtle noise texture to the fading phosphor
-        // This simulates the slight irregularities in real CRT phosphor coatings
-        if (fadeAmount < 0.3) { // Only add noise during slow fade phase
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.01)';
-            for (let i = 0; i < 5; i++) {
-                const x = Math.random() * this.width;
-                const y = Math.random() * this.height;
-                const size = 2 + Math.random() * 4;
-                ctx.beginPath();
-                ctx.arc(x, y, size, 0, Math.PI * 2);
-                ctx.fill();
+        // For each phosphor type
+        for (const type of ['p1', 'p7', 'p31']) {
+            decayLUT[type] = {
+                fast: new Array(LUT_SIZE),
+                medium: new Array(LUT_SIZE),
+                slow: new Array(LUT_SIZE)
+            };
+            
+            // Get time constants (convert from ms to seconds)
+            const fastDecay = this.oscilloscopeBuffers.decayConstants[type].fast / 1000;
+            const mediumDecay = this.oscilloscopeBuffers.decayConstants[type].medium / 1000;
+            const slowDecay = this.oscilloscopeBuffers.decayConstants[type].slow / 1000;
+            
+            // Populate lookup tables with pre-calculated exponential decay values
+            // These follow the physics of phosphor decay: intensity = initial * e^(-t/tau)
+            for (let i = 0; i < LUT_SIZE; i++) {
+                const t = i / LUT_SIZE * 2.0; // Time from 0 to 2 seconds
+                decayLUT[type].fast[i] = Math.exp(-t / fastDecay);
+                decayLUT[type].medium[i] = Math.exp(-t / mediumDecay);
+                decayLUT[type].slow[i] = Math.exp(-t / slowDecay);
             }
         }
+        
+        // Store for later use
+        this.oscilloscopeBuffers.decayLUT = decayLUT;
+    }
+    
+    /**
+     * Apply scientifically accurate phosphor fade to simulate real CRT phosphor physics
+     * @param {number} deltaTime - Time since last frame in seconds
+     * @param {number} redTint - Optional override for red component
+     * @param {number} greenTint - Optional override for green component
+     * @param {number} blueTint - Optional override for blue component
+     */
+    fadePhosphorBuffer(deltaTime, redTint = null, greenTint = null, blueTint = null) {
+        if (!this.oscilloscopeBuffers.initialized) return;
+        
+        // Get primary and secondary persistence contexts
+        const primaryCtx = this.oscilloscopeBuffers.persistenceCtx;
+        const secondaryCtx = this.oscilloscopeBuffers.persistenceCtxLong;
+        
+        // Get current phosphor type
+        const phosphorType = this.oscilloscopeBuffers.phosphorType;
+        
+        // Get decay time constants for current phosphor type (in seconds)
+        const fastDecay = this.oscilloscopeBuffers.decayConstants[phosphorType].fast / 1000;
+        const mediumDecay = this.oscilloscopeBuffers.decayConstants[phosphorType].medium / 1000;
+        const slowDecay = this.oscilloscopeBuffers.decayConstants[phosphorType].slow / 1000;
+        const veryLongDecay = this.oscilloscopeBuffers.decayConstants[phosphorType].veryLong / 1000;
+        
+        // Get phosphor colors for the selected type
+        const initialColor = this.oscilloscopeBuffers.phosphorColors[phosphorType].initial;
+        const afterglowColor = this.oscilloscopeBuffers.phosphorColors[phosphorType].afterglow;
+        
+        // Allow optional color override (for backward compatibility)
+        const r1 = redTint !== null ? redTint : initialColor.r / 255;
+        const g1 = greenTint !== null ? greenTint : initialColor.g / 255;
+        const b1 = blueTint !== null ? blueTint : initialColor.b / 255;
+        
+        const r2 = afterglowColor.r / 255;
+        const g2 = afterglowColor.g / 255;
+        const b2 = afterglowColor.b / 255;
+        
+        // Calculate exponential decay factors from time constants
+        // Using the physics equation: intensity = initial * e^(-t/tau)
+        // where tau is the time constant (time for intensity to reach 1/e or ~37% of initial)
+        
+        // Primary (faster) decay - this is the initial bright phosphor glow
+        const primaryDecay = Math.exp(-deltaTime / fastDecay);
+        const primaryFade = 1.0 - primaryDecay;
+        
+        // Secondary (medium) decay component
+        const secondaryDecay = Math.exp(-deltaTime / mediumDecay);
+        const secondaryFade = 1.0 - secondaryDecay;
+        
+        // Very long-lasting afterglow decay (especially important for P7 phosphor)
+        const afterglowDecay = Math.exp(-deltaTime / veryLongDecay);
+        const afterglowFade = 1.0 - afterglowDecay * 0.99; // Slightly faster to avoid eternal glow
+        
+        // Apply multi-stage decay to primary persistence buffer
+        // This handles the faster components of phosphor decay
+        
+        // Fast initial component with primary phosphor color
+        primaryCtx.fillStyle = `rgba(
+            ${Math.floor(r1 * 255 * 0.02)}, 
+            ${Math.floor(g1 * 255 * 0.02)}, 
+            ${Math.floor(b1 * 255 * 0.02)}, 
+            ${primaryFade * 0.9})`;
+        primaryCtx.fillRect(0, 0, this.width, this.height);
+        
+        // Apply medium-term decay component 
+        primaryCtx.fillStyle = `rgba(
+            ${Math.floor(r1 * 255 * 0.01)}, 
+            ${Math.floor(g1 * 255 * 0.01)}, 
+            ${Math.floor(b1 * 255 * 0.01)}, 
+            ${secondaryFade * 0.4})`;
+        primaryCtx.fillRect(0, 0, this.width, this.height);
+        
+        // Apply long-term afterglow decay to secondary buffer
+        // This is especially important for P7 phosphors which have dual-component decay:
+        // initial bright blue which transitions to much longer-lasting yellow afterglow
+        secondaryCtx.fillStyle = `rgba(
+            ${Math.floor(r2 * 255 * 0.005)}, 
+            ${Math.floor(g2 * 255 * 0.005)}, 
+            ${Math.floor(b2 * 255 * 0.005)}, 
+            ${afterglowFade * 0.3})`;
+        secondaryCtx.fillRect(0, 0, this.width, this.height);
+        
+        // Apply subtle phosphor graininess based on graininess parameter
+        // Real phosphor screens have microscopic phosphor crystals that create a subtle texture
+        if (this.oscilloscopeBuffers.graininess > 0 && Math.random() < 0.3) {
+            const graininess = this.oscilloscopeBuffers.graininess;
+            const grainCount = Math.floor(8 * graininess);
+            
+            primaryCtx.fillStyle = 'rgba(0, 0, 0, 0.01)';
+            for (let i = 0; i < grainCount; i++) {
+                const x = Math.random() * this.width;
+                const y = Math.random() * this.height;
+                const size = 1 + Math.random() * 3 * graininess;
+                primaryCtx.beginPath();
+                primaryCtx.arc(x, y, size, 0, Math.PI * 2);
+                primaryCtx.fill();
+            }
+        }
+    }
+    
+    /**
+     * Draw oscilloscope trace using particle-based rendering for a more authentic analog look
+     * Real analog oscilloscopes use an electron beam that creates points, not lines
+     */
+    /**
+     * Draw physically accurate electron beam using real CRT beam physics and phosphor excitation
+     * This simulates how electron beams in analog oscilloscopes actually interact with phosphor
+     * @param {Array} xData - X coordinates (normalized -1 to 1)
+     * @param {Array} yData - Y coordinates (normalized -1 to 1)
+     * @param {Array} velocities - Beam velocities at each point
+     * @param {Array} accelerations - Beam accelerations at each point
+     */
+    drawPhysicallyAccurateBeam(xData, yData, velocities, accelerations) {
+        if (!xData || !yData || xData.length === 0) return;
+        
+        // Get canvas contexts
+        const mainCtx = this.ctx;
+        const persistenceCtx = this.oscilloscopeBuffers.persistenceCtx;
+        const persistenceCtxLong = this.oscilloscopeBuffers.persistenceCtxLong;
+        
+        // Screen coordinates
+        const pointCount = Math.min(xData.length, yData.length);
+        const centerX = this.width / 2;
+        const centerY = this.height / 2;
+        const scale = Math.min(this.width, this.height) * 0.4;
+        
+        // Get current phosphor type and colors
+        const phosphorType = this.oscilloscopeBuffers.phosphorType;
+        const initialColor = this.oscilloscopeBuffers.phosphorColors[phosphorType].initial;
+        const afterglowColor = this.oscilloscopeBuffers.phosphorColors[phosphorType].afterglow;
+        
+        // Convert RGB colors to HSV for blending
+        const initialHSV = this.rgbToHsv(
+            initialColor.r / 255, 
+            initialColor.g / 255, 
+            initialColor.b / 255
+        );
+        
+        // Calculate beam parameters - in real oscilloscopes these depend on:
+        // 1. Electron gun intensity (brightness control)
+        // 2. Focus control (beam sharpness)
+        // 3. Accelerating voltage (affects beam size and energy)
+        const beamIntensity = this.oscilloscopeBuffers.beamIntensity;
+        const beamSharpness = this.oscilloscopeBuffers.beamSharpness;
+        const beamSize = this.oscilloscopeBuffers.beamSize;
+        
+        // Calculate maximum velocity for normalization
+        let maxVelocity = 0.001; // Avoid division by zero
+        let maxAcceleration = 0.001;
+        
+        for (let i = 1; i < velocities.length; i++) {
+            maxVelocity = Math.max(maxVelocity, velocities[i]);
+            if (accelerations[i]) {
+                maxAcceleration = Math.max(maxAcceleration, accelerations[i]);
+            }
+        }
+        
+        // Save context states
+        mainCtx.save();
+        persistenceCtx.save();
+        persistenceCtxLong.save();
+        
+        // Set blend mode for additive blending
+        // This is physically accurate - in real phosphors, multiple hits by the electron beam
+        // create brighter spots through cumulative excitation
+        mainCtx.globalCompositeOperation = 'lighter';
+        persistenceCtx.globalCompositeOperation = 'lighter';
+        persistenceCtxLong.globalCompositeOperation = 'lighter';
+        
+        // Draw each sample point as a phosphor excitation spot
+        for (let i = 0; i < pointCount; i++) {
+            // Calculate normalized screen coordinates
+            const x = centerX + xData[i] * scale;
+            const y = centerY + yData[i] * scale;
+            
+            // Skip points outside the visible CRT area
+            if (Math.sqrt(Math.pow(x - centerX, 2) + Math.pow(y - centerY, 2)) > scale) continue;
+            
+            // Calculate beam physics
+            // Real electron beams follow these principles:
+            // 1. Beam velocity affects dwell time (faster beam = less phosphor excitation)
+            // 2. Accelerating potential affects beam energy (more energy = brighter spot)
+            // 3. Beam focus affects spot size (better focus = smaller, sharper spot)
+            // 4. Beam defocus occurs during rapid changes in direction (high acceleration)
+            
+            // Get velocity and normalize (avoid division by zero)
+            let velocity = velocities[i] || 0.001;
+            velocity = Math.min(velocity / maxVelocity, 2.0);
+            
+            // Get acceleration and normalize
+            let acceleration = accelerations[i] || 0.001;
+            acceleration = Math.min(acceleration / maxAcceleration, 2.0);
+            
+            // Calculate beam intensity using physics-based model:
+            // 1. Phosphor excitation is inversely proportional to beam velocity
+            // 2. This follows from the physical principle that slower beam = more time to excite phosphor
+            // 3. This relationship is non-linear in real oscilloscopes
+            const velocityFactor = 1.0 - Math.min(0.95, velocity * 0.7);
+            
+            // Apply non-linear response curve for realistic intensity transfer function
+            // Real phosphors have a non-linear response to electron excitation
+            let intensityMod = Math.pow(velocityFactor, 1.2) * beamIntensity;
+            
+            // Calculate spot size - depends on multiple physical factors:
+            // 1. Beam focus setting (user controllable)
+            // 2. Beam velocity (faster beams create smaller spots)
+            // 3. Acceleration (rapid changes in direction cause beam defocusing)
+            // All of these match real oscilloscope physics
+            
+            // Base size depends on focus control
+            const focusFactor = Math.max(0.6, beamSharpness);
+            
+            // High acceleration causes beam defocusing in real oscilloscopes
+            // This creates the characteristic "blob" at sharp corners in the trace
+            const accelDefocus = 1.0 + (acceleration * 0.3);
+            
+            // Calculate final dot size combining all physical factors
+            const dotSize = beamSize * (
+                (3.5 / focusFactor) * // Focus control effect
+                (0.7 + (1.0 - velocity) * 0.3) * // Velocity effect (slower = larger spot)
+                accelDefocus // Acceleration defocus effect
+            );
+            
+            // Calculate visual characteristics based on physical properties
+            // Brightness depends on beam intensity and dwell time
+            const particleBrightness = Math.min(1.0, intensityMod * 1.2);
+            
+            // Saturation varies with intensity - brighter spots appear more saturated
+            // This matches the spectral emission characteristics of real phosphors
+            const particleSaturation = Math.max(0.2, Math.min(1.0, initialHSV.s * (0.85 + intensityMod * 0.15)));
+            
+            // Draw to main canvas with immediate, bright response
+            // Phosphors have an immediate bright response when first excited
+            
+            // Draw main bright spot
+            mainCtx.beginPath();
+            // Create a radial gradient for realistic beam spot profile
+            const spotGradient = mainCtx.createRadialGradient(
+                x, y, 0,
+                x, y, dotSize * 1.2
+            );
+            
+            // Real electron beam spots have a Gaussian intensity profile
+            spotGradient.addColorStop(0, this.hsbaToRgba(
+                initialHSV.h, 
+                particleSaturation * 0.8, 
+                particleBrightness, 
+                0.9
+            ));
+            spotGradient.addColorStop(0.4, this.hsbaToRgba(
+                initialHSV.h, 
+                particleSaturation, 
+                particleBrightness * 0.6, 
+                0.7
+            ));
+            spotGradient.addColorStop(1, this.hsbaToRgba(
+                initialHSV.h, 
+                particleSaturation * 0.9, 
+                particleBrightness * 0.1, 
+                0.1
+            ));
+            
+            mainCtx.fillStyle = spotGradient;
+            mainCtx.arc(x, y, dotSize * 1.2, 0, Math.PI * 2);
+            mainCtx.fill();
+            
+            // Draw inner bright core - the most energetic part of the beam
+            mainCtx.beginPath();
+            mainCtx.fillStyle = this.hsbaToRgba(
+                initialHSV.h, 
+                particleSaturation * 0.5, 
+                particleBrightness * 1.4, 
+                0.95
+            );
+            mainCtx.arc(x, y, dotSize * 0.4, 0, Math.PI * 2);
+            mainCtx.fill();
+            
+            // Draw to primary persistence buffer (faster decay component)
+            persistenceCtx.globalAlpha = intensityMod * 0.9;
+            persistenceCtx.beginPath();
+            persistenceCtx.fillStyle = this.rgbaToString(
+                initialColor.r, 
+                initialColor.g, 
+                initialColor.b, 
+                intensityMod * 255
+            );
+            persistenceCtx.arc(x, y, dotSize * 0.85, 0, Math.PI * 2);
+            persistenceCtx.fill();
+            
+            // Draw to secondary persistence buffer (long decay component)
+            // For P7 phosphor this creates the yellow afterglow effect
+            persistenceCtxLong.globalAlpha = intensityMod * 0.7;
+            persistenceCtxLong.beginPath();
+            persistenceCtxLong.fillStyle = this.rgbaToString(
+                afterglowColor.r, 
+                afterglowColor.g, 
+                afterglowColor.b, 
+                intensityMod * 200
+            );
+            persistenceCtxLong.arc(x, y, dotSize * 0.75, 0, Math.PI * 2);
+            persistenceCtxLong.fill();
+        }
+        
+        // Restore context states
+        mainCtx.restore();
+        persistenceCtx.restore();
+        persistenceCtxLong.restore();
+    }
+    
+    /**
+     * Helper for RGBA color string creation
+     */
+    rgbaToString(r, g, b, a) {
+        return `rgba(${Math.floor(r)}, ${Math.floor(g)}, ${Math.floor(b)}, ${a/255})`;
     }
     
     /**
@@ -2967,5 +3334,863 @@ class VisualEngine {
         ctx.fillRect(0, 0, this.width, this.height);
         
         ctx.restore();
+    }
+    
+    /**
+     * Render the stereo audio oscilloscope with direct L/R amplitude visualization
+     * This version maps L audio amplitude directly to X axis and R to Y axis
+     */
+    renderStereoOscilloscope() {
+        // Make sure audio is initialized globally
+        this.updateAudioData();
+        
+        // Get parameters and map them to appropriate ranges
+        const brightness = this.mapParam(this.params.brightness, 0.6, 1.0);
+        const complexity = this.mapParam(this.params.complexity, 1, 8);
+        const speed = this.mapParam(this.params.speed, 0.2, 2.0);
+        
+        // Map controls to oscilloscope-specific parameters
+        this.oscilloscopeBuffers.beamIntensity = this.mapParam(this.params.size, 0.3, 1.0); // Renamed from size for clarity
+        this.oscilloscopeBuffers.beamSharpness = this.mapParam(this.params.saturation, 0.7, 0.9); // Focus control
+        
+        // Initialize oscilloscope buffers if needed
+        this.initOscilloscopeBuffers();
+        
+        // Calculate time since last frame for physically accurate decay simulation
+        const now = performance.now();
+        const deltaTime = Math.min(100, now - this.oscilloscopeBuffers.lastFrameTime) / 1000;
+        this.oscilloscopeBuffers.lastFrameTime = now;
+        
+        // Apply scientifically accurate phosphor fade based on real CRT phosphor decay physics
+        // This uses the proper exponential decay function with time constants from real phosphors
+        this.fadePhosphorBuffer(deltaTime);
+        
+        // Sample arrays for X-Y plots
+        let xData = []; // Will store left channel data (X axis)
+        let yData = []; // Will store right channel data (Y axis)
+        let velocities = []; // Store beam velocity for realistic intensity modulation
+        let accelerations = []; // Store acceleration for extra realism (rate of change of velocity)
+        
+        // Higher resolution for accurate X-Y oscilloscope (lab-grade oscilloscopes 
+        // typically have higher sampling rates than basic models)
+        const sampleRate = 1; // Maximum resolution - sample every point for precise plots
+        
+        // Only proceed if we have time domain data
+        if (this.audioData.initialized && this.audioData.timeDomainArray) {
+            const timeData = this.audioData.timeDomainArray;
+            const timeDataLength = timeData.length;
+            
+            if (timeDataLength > 0) {
+                // Calculate how many points to process based on sample rate
+                const pointCount = Math.floor(timeDataLength / (2 * sampleRate));
+                
+                // Auto-scaling behavior based on signal amplitude
+                // Real analog scopes have auto-range/calibration capabilities
+                
+                // Find maximum deviation to dynamically scale the display
+                // This prevents very quiet signals from being invisible and loud signals from clipping
+                let maxDeviation = 0;
+                for (let i = 0; i < timeDataLength; i++) {
+                    maxDeviation = Math.max(maxDeviation, Math.abs(timeData[i] - 128));
+                }
+                
+                // Apply non-linear scaling with a minimum threshold for visibility
+                // This mimics the auto-ranging behavior of high-quality oscilloscopes
+                const scaleFactor = maxDeviation < 3 ? 2.0 : Math.pow(127 / Math.max(1, maxDeviation), 0.85) * 1.2;
+                
+                // Use the first half of the audio buffer for left channel (X-axis) 
+                // and the second half for right channel (Y-axis)
+                const halfLength = Math.floor(timeDataLength / 2);
+                
+                // Previous sample values for calculating velocity and acceleration
+                let prevX = 0, prevY = 0;
+                let prevVelocity = 0;
+                
+                for (let i = 0; i < pointCount; i++) {
+                    // Get sample indexes for left and right channels with interleaving pattern
+                    const xIndex = i * sampleRate;
+                    const yIndex = halfLength + i * sampleRate;
+                    
+                    // Safety check for array bounds
+                    if (xIndex < halfLength && yIndex < timeDataLength) {
+                        // Convert from 0-255 range to -1.0 to 1.0 range with auto-scaling
+                        // 128 is the center/silence value in the audio buffer
+                        const xRaw = timeData[xIndex] - 128;
+                        const yRaw = timeData[yIndex % timeDataLength] - 128;
+                        
+                        // Apply auto-scaling and normalize to -1.0 to 1.0 range
+                        const x = (xRaw * scaleFactor) / 128.0;
+                        const y = (yRaw * scaleFactor) / 128.0;
+                        
+                        // Store normalized values
+                        xData[i] = x;
+                        yData[i] = y;
+                        
+                        // Calculate beam velocity - crucial for realistic phosphor excitation
+                        // In real CRTs, the electron beam excites phosphor proportional to dwell time
+                        // Fast-moving beams create dimmer traces because they spend less time at each point
+                        if (i > 0) {
+                            const dx = x - prevX;
+                            const dy = y - prevY;
+                            const velocity = Math.sqrt(dx*dx + dy*dy);
+                            velocities[i] = velocity;
+                            
+                            // Calculate acceleration (rate of change of velocity)
+                            // This affects the beam focus and spot size in real oscilloscopes
+                            const acceleration = Math.abs(velocity - prevVelocity);
+                            accelerations[i] = acceleration;
+                            
+                            // Update previous velocity
+                            prevVelocity = velocity;
+                        } else {
+                            velocities[i] = 0;
+                            accelerations[i] = 0;
+                        }
+                        
+                        // Update previous position
+                        prevX = x;
+                        prevY = y;
+                    }
+                }
+            } else {
+                // If no valid audio data yet, create a placeholder Lissajous pattern
+                // Lissajous figures are characteristic of XY oscilloscopes
+                this.generateLissajousPattern(xData, yData, velocities, accelerations, 200, 3, 2, Math.PI/4);
+            }
+        } else {
+            // No audio initialized, generate an interesting Lissajous pattern
+            // Use frequency ratio to create a more complex and visually appealing pattern
+            this.generateLissajousPattern(xData, yData, velocities, accelerations, 240, 3, 4, Math.PI/4);
+        }
+        
+        // Store current trace data for precise phosphor persistence simulation
+        if (xData.length > 0 && yData.length > 0) {
+            // Store a copy of the current data with velocities and time
+            this.oscilloscopeBuffers.traceHistory.unshift({
+                xData: [...xData],
+                yData: [...yData],
+                velocities: [...velocities],
+                accelerations: [...accelerations],
+                time: now
+            });
+            
+            // Limit history length based on phosphor type's persistence requirements
+            const historyNeeded = this.oscilloscopeBuffers.phosphorType === 'p7' ? 4 : 3;
+            
+            if (this.oscilloscopeBuffers.traceHistory.length > historyNeeded) {
+                this.oscilloscopeBuffers.traceHistory.pop();
+            }
+        }
+        
+        // Draw round CRT background with classic analog oscilloscope appearance
+        this.drawClassicOscilloscopeBackground();
+        
+        // Draw oscilloscope grid (based on current phosphor color)
+        const currentPhosphor = this.oscilloscopeBuffers.phosphorType;
+        const phosphorColor = this.oscilloscopeBuffers.phosphorColors[currentPhosphor].initial;
+        
+        // Convert RGB values to HSV for grid drawing
+        const { h, s, v } = this.rgbToHsv(
+            phosphorColor.r / 255, 
+            phosphorColor.g / 255, 
+            phosphorColor.b / 255
+        );
+        
+        // Draw calibration grid
+        this.drawStereoOscilloscopeGrid(h, s * 0.9, v * 0.8);
+        
+        // Layer the persistence buffers to create the characteristic phosphor glow
+        // Primary buffer contains faster decay phosphor
+        this.ctx.drawImage(this.oscilloscopeBuffers.persistenceCanvas, 0, 0);
+        
+        // Secondary buffer contains long-persistence afterglow (especially for P7 phosphor)
+        // Use screen blending for more realistic glow
+        this.ctx.globalCompositeOperation = 'screen';
+        this.ctx.globalAlpha = 0.6;
+        this.ctx.drawImage(this.oscilloscopeBuffers.persistenceCanvasLong, 0, 0);
+        this.ctx.globalCompositeOperation = 'source-over';
+        this.ctx.globalAlpha = 1.0;
+        
+        // Draw the current frame electron beam trace with physics-accurate rendering
+        this.drawPhysicallyAccurateBeam(xData, yData, velocities, accelerations);
+        
+        // Add CRT effects (scan lines, vignette, etc.) for realism
+        this.applyStereoOscilloscopeEffects(h, s, v);
+    }
+    
+    /**
+     * Generate Lissajous pattern with accurate velocity/acceleration for oscilloscope simulation
+     * Lissajous figures are characteristic test patterns on X-Y oscilloscopes
+     */
+    generateLissajousPattern(xData, yData, velocities, accelerations, count, xFreq, yFreq, phaseOffset) {
+        let prevX = 0, prevY = 0;
+        let prevVelocity = 0;
+        
+        for (let i = 0; i < count; i++) {
+            const t = (i / count) * Math.PI * 2;
+            
+            // Generate Lissajous figure with the given frequencies and phase
+            xData[i] = Math.sin(xFreq * t) * 0.75;
+            yData[i] = Math.sin(yFreq * t + phaseOffset) * 0.75;
+            
+            // Calculate real physics properties
+            if (i > 0) {
+                const dx = xData[i] - prevX;
+                const dy = yData[i] - prevY;
+                const velocity = Math.sqrt(dx*dx + dy*dy);
+                velocities[i] = velocity;
+                
+                // Calculate acceleration for beam focusing effects
+                const acceleration = Math.abs(velocity - prevVelocity);
+                accelerations[i] = acceleration;
+                
+                prevVelocity = velocity;
+            } else {
+                velocities[i] = 0;
+                accelerations[i] = 0;
+            }
+            
+            prevX = xData[i];
+            prevY = yData[i];
+        }
+    }
+    
+    /**
+     * Utility to convert RGB to HSV for accurate phosphor color mapping
+     */
+    rgbToHsv(r, g, b) {
+        let max = Math.max(r, g, b);
+        let min = Math.min(r, g, b);
+        let h, s, v = max;
+        let d = max - min;
+        
+        s = max === 0 ? 0 : d / max;
+        
+        if (max === min) {
+            h = 0; // achromatic
+        } else {
+            switch (max) {
+                case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+                case g: h = (b - r) / d + 2; break;
+                case b: h = (r - g) / d + 4; break;
+            }
+            h /= 6;
+        }
+        
+        return { h, s, v };
+    }
+    
+    /**
+     * Draw classic round CRT background for analog oscilloscope
+     */
+    drawClassicOscilloscopeBackground() {
+        const ctx = this.ctx;
+        ctx.save();
+        
+        // Round oscilloscope tube effect
+        const centerX = this.width / 2;
+        const centerY = this.height / 2;
+        const radius = Math.min(this.width, this.height) * 0.47; // Slightly smaller than screen
+        
+        // First clear the entire canvas with black
+        ctx.fillStyle = 'rgb(0, 0, 0)';
+        ctx.fillRect(0, 0, this.width, this.height);
+        
+        // Create a radial gradient for the phosphor background glow
+        const gradBg = ctx.createRadialGradient(
+            centerX, centerY, 0,
+            centerX, centerY, radius
+        );
+        gradBg.addColorStop(0, 'rgba(0, 5, 12, 1)'); // Very dark blue at center
+        gradBg.addColorStop(0.7, 'rgba(0, 4, 10, 1)'); // Dark blue
+        gradBg.addColorStop(1, 'rgba(0, 2, 5, 1)'); // Even darker at edges
+        
+        // Draw the CRT round screen background
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+        ctx.fillStyle = gradBg;
+        ctx.fill();
+        
+        // Draw subtle circular screen border/bezel
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = 'rgba(10, 10, 14, 0.8)';
+        ctx.stroke();
+        
+        // Add outer bezel highlight
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, radius + 3, 0, Math.PI * 2);
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = 'rgba(40, 40, 50, 0.6)';
+        ctx.stroke();
+        
+        ctx.restore();
+    }
+    
+    /**
+     * Draw the stereo oscilloscope grid (classic analog X-Y grid style)
+     */
+    drawStereoOscilloscopeGrid(hue, saturation, brightness) {
+        const ctx = this.ctx;
+        ctx.save();
+        
+        // Get center and radius for the round oscilloscope display
+        const centerX = this.width / 2;
+        const centerY = this.height / 2;
+        const radius = Math.min(this.width, this.height) * 0.45; // Slightly smaller than background
+        
+        // Classic analog oscilloscope grid colors - subtle blue tint for P7 phosphor
+        const gridColor = this.hsbaToRgba(hue, saturation * 0.5, brightness * 0.25, 0.15);
+        const majorGridColor = this.hsbaToRgba(hue, saturation * 0.6, brightness * 0.35, 0.25);
+        const borderColor = this.hsbaToRgba(hue, saturation * 0.7, brightness * 0.4, 0.35);
+        
+        // Calculate grid spacing for an 8x8 grid (typical for classic oscilloscopes)
+        const gridDivisions = 8;
+        const gridSpacing = (radius * 2) / gridDivisions;
+        
+        // Calculate the starting point for grid lines
+        const startX = centerX - radius;
+        const startY = centerY - radius;
+        const endX = centerX + radius;
+        const endY = centerY + radius;
+        
+        // Draw circular oscilloscope frame for clipping the grid
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+        ctx.clip(); // Only draw grid inside the circular display
+        
+        // Draw minor grid lines
+        ctx.strokeStyle = gridColor;
+        ctx.lineWidth = 1;
+        
+        // Vertical lines
+        for (let i = 0; i <= gridDivisions; i++) {
+            const x = startX + i * gridSpacing;
+            ctx.beginPath();
+            ctx.moveTo(x, startY);
+            ctx.lineTo(x, endY);
+            ctx.stroke();
+        }
+        
+        // Horizontal lines
+        for (let i = 0; i <= gridDivisions; i++) {
+            const y = startY + i * gridSpacing;
+            ctx.beginPath();
+            ctx.moveTo(startX, y);
+            ctx.lineTo(endX, y);
+            ctx.stroke();
+        }
+        
+        // Draw major grid lines (center cross)
+        ctx.strokeStyle = majorGridColor;
+        ctx.lineWidth = 1.5;
+        
+        // Vertical center line
+        ctx.beginPath();
+        ctx.moveTo(centerX, startY);
+        ctx.lineTo(centerX, endY);
+        ctx.stroke();
+        
+        // Horizontal center line
+        ctx.beginPath();
+        ctx.moveTo(startX, centerY);
+        ctx.lineTo(endX, centerY);
+        ctx.stroke();
+        
+        // Draw subtle circular divisions (common in analog oscilloscopes)
+        ctx.strokeStyle = gridColor;
+        ctx.lineWidth = 1;
+        
+        // Draw concentric circles
+        for (let r = radius / 4; r <= radius; r += radius / 4) {
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, r, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+        
+        // Draw axis labels with classic oscilloscope style
+        ctx.fillStyle = this.hsbaToRgba(hue, saturation * 0.7, brightness * 0.7, 0.7);
+        ctx.font = '12px monospace';
+        
+        // Left channel label (X axis)
+        ctx.textAlign = 'left';
+        ctx.fillText('L CH', startX + 8, centerY - 8);
+        
+        // Right channel label (Y axis)
+        ctx.textAlign = 'center';
+        ctx.fillText('R CH', centerX + 8, startY + 16);
+        
+        // Restore context
+        ctx.restore();
+        
+        // Draw circular border (outside the clipping region)
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+        ctx.strokeStyle = borderColor;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+    }
+    
+    /**
+     * Draw the stereo oscilloscope trace with phosphor effect
+     */
+    drawStereoOscilloscopeTrace(xData, yData, hue, saturation, brightness, size) {
+        if (!xData || !yData || xData.length === 0) return;
+        
+        const ctx = this.ctx;
+        const persistenceCtx = this.oscilloscopeBuffers.persistenceCtx;
+        const pointCount = Math.min(xData.length, yData.length);
+        const centerX = this.width / 2;
+        const centerY = this.height / 2;
+        const scale = Math.min(this.width, this.height) * 0.4 * size;
+        
+        // Draw trace with multiple passes for glow effect
+        
+        // Function to draw the trace at different glow levels
+        const drawTrace = (targetCtx, outerGlow) => {
+            // Save context state
+            targetCtx.save();
+            
+            // Set blend mode for additive blending
+            targetCtx.globalCompositeOperation = 'lighter';
+            
+            if (outerGlow) {
+                // 1. Draw widest, dimmest outer glow
+                targetCtx.strokeStyle = this.hsbaToRgba(hue, saturation * 0.7, brightness * 0.3, 0.2);
+                targetCtx.lineWidth = 8; // Slightly thinner than edgy scope
+                targetCtx.lineCap = 'round';
+                targetCtx.lineJoin = 'round';
+                targetCtx.beginPath();
+                
+                for (let i = 0; i < pointCount; i++) {
+                    const x = centerX + xData[i] * scale;
+                    const y = centerY + yData[i] * scale;
+                    
+                    if (i === 0) {
+                        targetCtx.moveTo(x, y);
+                    } else {
+                        targetCtx.lineTo(x, y);
+                    }
+                }
+                
+                targetCtx.stroke();
+                
+                // 2. Draw medium glow
+                targetCtx.strokeStyle = this.hsbaToRgba(hue, saturation * 0.8, brightness * 0.6, 0.4);
+                targetCtx.lineWidth = 4; // Slightly thinner than edgy scope
+                targetCtx.beginPath();
+                
+                for (let i = 0; i < pointCount; i++) {
+                    const x = centerX + xData[i] * scale;
+                    const y = centerY + yData[i] * scale;
+                    
+                    if (i === 0) {
+                        targetCtx.moveTo(x, y);
+                    } else {
+                        targetCtx.lineTo(x, y);
+                    }
+                }
+                
+                targetCtx.stroke();
+            }
+            
+            // 3. Draw main bright trace
+            targetCtx.strokeStyle = this.hsbaToRgba(hue, saturation, brightness, 0.9);
+            targetCtx.lineWidth = 1.5; // Slightly thinner than edgy scope for more precision
+            targetCtx.beginPath();
+            
+            for (let i = 0; i < pointCount; i++) {
+                const x = centerX + xData[i] * scale;
+                const y = centerY + yData[i] * scale;
+                
+                if (i === 0) {
+                    targetCtx.moveTo(x, y);
+                } else {
+                    targetCtx.lineTo(x, y);
+                }
+            }
+            
+            targetCtx.stroke();
+            
+            targetCtx.restore();
+        };
+        
+        // Draw to main canvas with full glow effect
+        drawTrace(ctx, true);
+        
+        // Draw to persistence buffer with reduced intensity for more authentic phosphor decay
+        persistenceCtx.globalAlpha = this.oscilloscopeBuffers.phosphorIntensity * 0.7;
+        drawTrace(persistenceCtx, false);
+        persistenceCtx.globalAlpha = 1.0;
+        
+        // Draw ghosting trails from previous frames (if any)
+        if (this.oscilloscopeBuffers.traceHistory.length > 0) {
+            // Draw historical traces with decreasing opacity
+            persistenceCtx.save();
+            persistenceCtx.globalCompositeOperation = 'lighter';
+            
+            for (let h = 0; h < this.oscilloscopeBuffers.traceHistory.length; h++) {
+                const historyItem = this.oscilloscopeBuffers.traceHistory[h];
+                
+                // Calculate age and apply non-linear fade for more authentic phosphor look
+                const age = (performance.now() - historyItem.time) / 1000; // Age in seconds
+                
+                // Apply non-linear fade curve for historical traces
+                const fadeExponent = this.oscilloscopeBuffers.phosphorFadeExponent;
+                const baseFade = Math.pow(age, 1/fadeExponent) * 2; // Non-linear fade
+                const opacity = Math.max(0, 0.15 - baseFade); // Lower starting opacity, longer tail
+                
+                if (opacity <= 0) continue;
+                
+                // Use a thinner, more faded line for ghost traces
+                persistenceCtx.strokeStyle = this.hsbaToRgba(
+                    hue, 
+                    saturation * 0.5 * (1 - age), // Reducing saturation with age
+                    brightness * 0.3, 
+                    opacity
+                );
+                persistenceCtx.lineWidth = 1;
+                persistenceCtx.beginPath();
+                
+                const historyXData = historyItem.xData;
+                const historyYData = historyItem.yData;
+                const historyPointCount = Math.min(historyXData.length, historyYData.length);
+                
+                for (let i = 0; i < historyPointCount; i += 2) { // Sample fewer points for performance
+                    const x = centerX + historyXData[i] * scale;
+                    const y = centerY + historyYData[i] * scale;
+                    
+                    if (i === 0) {
+                        persistenceCtx.moveTo(x, y);
+                    } else {
+                        persistenceCtx.lineTo(x, y);
+                    }
+                }
+                
+                persistenceCtx.stroke();
+            }
+            
+            persistenceCtx.restore();
+        }
+    }
+    
+    /**
+     * Apply physically accurate CRT post-processing effects to the oscilloscope display
+     * @param {number} hue - Base phosphor hue
+     * @param {number} saturation - Phosphor saturation
+     * @param {number} brightness - Phosphor brightness
+     */
+    applyStereoOscilloscopeEffects(hue, saturation, brightness) {
+        const ctx = this.ctx;
+        ctx.save();
+        
+        const centerX = this.width / 2;
+        const centerY = this.height / 2;
+        const radius = Math.min(this.width, this.height) * 0.47;
+        const curvature = this.oscilloscopeBuffers.screenCurvature;
+        
+        // Current phosphor type
+        const phosphorType = this.oscilloscopeBuffers.phosphorType;
+        
+        // Apply characteristic glow/bloom based on phosphor type
+        // Different phosphors have different spectral characteristics:
+        // - P1 has a moderate bloom with greenish tint
+        // - P7 has a strong bloom with blueish initial glow
+        // - P31 has a brighter, more focused bloom
+        
+        // Calculate bloom parameters based on phosphor type
+        let bloomIntensity, bloomSize;
+        
+        switch (phosphorType) {
+            case 'p1':
+                bloomIntensity = 0.2;  // Moderate bloom
+                bloomSize = 2.0;       // Medium spread
+                break;
+            case 'p7':
+                bloomIntensity = 0.25; // Stronger bloom 
+                bloomSize = 2.5;       // Wider spread
+                break;
+            case 'p31':
+                bloomIntensity = 0.15; // Sharper bloom
+                bloomSize = 1.5;       // Narrower spread
+                break;
+            default:
+                bloomIntensity = 0.2;
+                bloomSize = 2.0;
+        }
+        
+        // Apply multi-stage bloom effect - this simulates the real light emission
+        // characteristics of phosphor as it excites neighboring phosphor particles
+        // and creates a characteristic glow
+        
+        // First stage - tight bloom
+        ctx.filter = 'blur(1px)';
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = bloomIntensity;
+        ctx.drawImage(this.canvas, 0, 0);
+        
+        // Second stage - medium bloom
+        ctx.globalAlpha = bloomIntensity * 0.6;
+        ctx.filter = `blur(${bloomSize}px)`;
+        ctx.drawImage(this.canvas, 0, 0);
+        
+        // Third stage - wide bloom (creates the characteristic CRT halo)
+        ctx.globalAlpha = bloomIntensity * 0.2;
+        ctx.filter = `blur(${bloomSize * 2}px)`;
+        ctx.drawImage(this.canvas, 0, 0);
+        
+        // Reset canvas settings
+        ctx.globalAlpha = 1.0;
+        ctx.filter = 'none';
+        ctx.globalCompositeOperation = 'source-over';
+        
+        // Clip to oscilloscope display area for internal effects
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+        ctx.clip();
+        
+        // Apply CRT screen curvature distortion effect
+        // This simulates the internal glass curvature of real CRTs
+        if (curvature > 0) {
+            // Draw the screen with a subtle bulge effect
+            ctx.save();
+            
+            // Apply a subtle spherical aberration along the screen edges
+            // This creates the slight color fringing seen on real CRTs
+            ctx.globalCompositeOperation = 'overlay';
+            ctx.globalAlpha = 0.03 * curvature * 5;
+            
+            // Apply the bulge/distortion
+            const bulgeGradient = ctx.createRadialGradient(
+                centerX, centerY, 0,
+                centerX, centerY, radius
+            );
+            
+            bulgeGradient.addColorStop(0, 'rgba(255, 255, 255, 0)');
+            bulgeGradient.addColorStop(0.7, 'rgba(200, 220, 255, 0.05)');
+            bulgeGradient.addColorStop(0.9, 'rgba(180, 200, 255, 0.1)');
+            bulgeGradient.addColorStop(1, 'rgba(150, 180, 255, 0.15)');
+            
+            ctx.fillStyle = bulgeGradient;
+            ctx.fillRect(0, 0, this.width, this.height);
+            ctx.restore();
+        }
+        
+        // Draw scan lines appropriate for phosphor type (varies with the screen technology)
+        const scanLineOpacity = phosphorType === 'p31' ? 0.07 : 0.1; // P31 has finer phosphor grain
+        const scanLineColor = this.hsbaToRgba(hue, saturation * 0.2, 0, scanLineOpacity);
+        ctx.fillStyle = scanLineColor;
+        
+        // Calculate scan line spacing based on screen resolution
+        const scanLineHeight = Math.max(1, Math.floor(this.height / 350));
+        
+        // Draw subtle scan lines
+        for (let y = scanLineHeight; y < this.height; y += scanLineHeight * 2) {
+            ctx.fillRect(0, y, this.width, scanLineHeight);
+        }
+        
+        // Draw realistic brightness falloff (electron beam is less intense at screen edges)
+        // This follows the physical principles of real CRTs where the electron beam
+        // has to travel further to reach the edges
+        const falloffGradient = ctx.createRadialGradient(
+            centerX, centerY, 0,
+            centerX, centerY, radius
+        );
+        
+        falloffGradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
+        falloffGradient.addColorStop(0.7, 'rgba(0, 0, 0, 0.05)');
+        falloffGradient.addColorStop(0.85, 'rgba(0, 0, 0, 0.15)');
+        falloffGradient.addColorStop(1, 'rgba(0, 0, 0, 0.3)');
+        
+        ctx.fillStyle = falloffGradient;
+        ctx.globalCompositeOperation = 'multiply';
+        ctx.fillRect(0, 0, this.width, this.height);
+        ctx.globalCompositeOperation = 'source-over';
+        
+        // Add phosphor graininess - the microscopic texture of real phosphor screens
+        const graininess = this.oscilloscopeBuffers.graininess;
+        if (graininess > 0) {
+            ctx.globalCompositeOperation = 'overlay';
+            ctx.globalAlpha = 0.03 * graininess * 5;
+            
+            // Create a realistic phosphor grain texture
+            const noiseCanvas = document.createElement('canvas');
+            noiseCanvas.width = 128;
+            noiseCanvas.height = 128;
+            const noiseCtx = noiseCanvas.getContext('2d');
+            
+            // Generate noise with slight correlation to simulate phosphor particle distribution
+            const noiseData = noiseCtx.createImageData(128, 128);
+            let prevNoise = 128;
+            
+            for (let i = 0; i < noiseData.data.length; i += 4) {
+                // Add slight correlation to previous pixel for more natural grain
+                const noise = Math.min(255, Math.max(0, 
+                    prevNoise + (Math.random() * 40 - 20)
+                ));
+                
+                noiseData.data[i] = noise;
+                noiseData.data[i+1] = noise;
+                noiseData.data[i+2] = noise;
+                noiseData.data[i+3] = 20 + Math.random() * 10; // Subtle, variable opacity
+                
+                prevNoise = noise;
+            }
+            
+            noiseCtx.putImageData(noiseData, 0, 0);
+            
+            // Apply the grain pattern
+            const pattern = ctx.createPattern(noiseCanvas, 'repeat');
+            ctx.fillStyle = pattern;
+            ctx.fillRect(0, 0, this.width, this.height);
+        }
+        
+        // Add subtle glass reflections found on real oscilloscope displays
+        ctx.globalCompositeOperation = 'overlay';
+        ctx.globalAlpha = 0.05;
+        
+        // Horizontal reflection gradient (simulates overhead lighting)
+        const reflectionGrad = ctx.createLinearGradient(0, 0, this.width, 0);
+        reflectionGrad.addColorStop(0, 'rgba(0, 0, 0, 0.2)');
+        reflectionGrad.addColorStop(0.3, 'rgba(180, 180, 255, 0.2)'); // Blueish reflection 
+        reflectionGrad.addColorStop(0.7, 'rgba(180, 180, 255, 0.2)');
+        reflectionGrad.addColorStop(1, 'rgba(0, 0, 0, 0.2)');
+        
+        ctx.fillStyle = reflectionGrad;
+        ctx.fillRect(0, 0, this.width, this.height);
+        
+        // Reset composite operation
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.globalAlpha = 1.0;
+        
+        // Add realistic power supply fluctuations
+        // Real analog oscilloscopes have slight voltage variations in their high-voltage supplies
+        // This creates subtle brightness fluctuations
+        const time = performance.now() / 1000;
+        
+        // Calculate fluctuations from multiple sources:
+        // 1. Random noise (brownian noise is more accurate than white noise)
+        // 2. Low-frequency mains hum (50/60Hz)
+        // 3. High-frequency switching noise
+        const randomFlicker = Math.random() * 0.006;
+        const mainsHum = Math.sin(time * 2 * Math.PI * 50) * 0.003; // 50Hz mains frequency
+        const highFreqNoise = Math.sin(time * 2 * Math.PI * 1000) * 0.001;
+        
+        const totalFlicker = Math.abs(randomFlicker + mainsHum + highFreqNoise);
+        
+        // Apply flicker with phosphor-appropriate color
+        ctx.fillStyle = this.hsbaToRgba(hue, saturation * 0.2, brightness * 0.5, totalFlicker);
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.fillRect(0, 0, this.width, this.height);
+        
+        ctx.restore();
+        
+        // Apply screen edge effects (outside the clipping region)
+        // This adds the characteristic glow around the edges of real CRT screens
+        // which is caused by internal reflections and electron scatter 
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = 0.03;
+        
+        // Top edge reflection (most prominent due to internal screen geometry)
+        const edgeGrad = ctx.createLinearGradient(
+            centerX, centerY - radius - 5, 
+            centerX, centerY - radius + 10
+        );
+        
+        // Color based on phosphor type
+        let edgeColor;
+        switch (phosphorType) {
+            case 'p1':  edgeColor = 'rgba(150, 255, 150, 0.15)'; break; // Green glow
+            case 'p7':  edgeColor = 'rgba(150, 150, 255, 0.15)'; break; // Blue glow
+            case 'p31': edgeColor = 'rgba(100, 255, 150, 0.15)'; break; // Bright green
+            default:    edgeColor = 'rgba(150, 150, 255, 0.15)';
+        }
+        
+        edgeGrad.addColorStop(0, 'rgba(150, 150, 255, 0)');
+        edgeGrad.addColorStop(0.5, edgeColor);
+        edgeGrad.addColorStop(1, 'rgba(150, 150, 255, 0)');
+        
+        // Draw the edge glow as a ring segment
+        ctx.fillStyle = edgeGrad;
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, radius + 5, Math.PI * 1.7, Math.PI * 2.3);
+        ctx.arc(centerX, centerY, radius - 5, Math.PI * 2.3, Math.PI * 1.7, true);
+        ctx.fill();
+        
+        ctx.restore();
+        
+        // Optional: Add phosphor type label to display (useful for debugging or educational purposes)
+        // Uncomment this section to show the current phosphor type
+        /*
+        ctx.save();
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+        ctx.font = '12px monospace';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        ctx.fillText(`Phosphor: ${phosphorType.toUpperCase()}`, 10, 10);
+        ctx.restore();
+        */
+    }
+    
+    /**
+     * Set oscilloscope phosphor type for authentic CRT emulation
+     * @param {string} phosphorType - Phosphor type ('p1', 'p7', or 'p31')
+     */
+    setOscilloscopePhosphorType(phosphorType) {
+        // Validate phosphor type
+        const validTypes = ['p1', 'p7', 'p31'];
+        if (!validTypes.includes(phosphorType)) {
+            console.warn(`Invalid phosphor type: ${phosphorType}. Using default.`);
+            phosphorType = 'p7';
+        }
+        
+        // Set phosphor type in the oscilloscope buffers
+        if (this.oscilloscopeBuffers) {
+            this.oscilloscopeBuffers.phosphorType = phosphorType;
+            console.log(`Set oscilloscope phosphor type to: ${phosphorType}`);
+            
+            // Adjust beam characteristics based on phosphor type
+            switch (phosphorType) {
+                case 'p1': // Standard green medium persistence
+                    this.oscilloscopeBuffers.beamSize = 1.0;
+                    this.oscilloscopeBuffers.beamSharpness = 0.8;
+                    this.oscilloscopeBuffers.graininess = 0.018;
+                    break;
+                    
+                case 'p7': // Blue-yellow dual phosphor (long persistence)
+                    this.oscilloscopeBuffers.beamSize = 1.0;
+                    this.oscilloscopeBuffers.beamSharpness = 0.75;
+                    this.oscilloscopeBuffers.graininess = 0.015;
+                    break;
+                    
+                case 'p31': // Bright green (fast decay, sharper trace)
+                    this.oscilloscopeBuffers.beamSize = 0.9;
+                    this.oscilloscopeBuffers.beamSharpness = 0.85;
+                    this.oscilloscopeBuffers.graininess = 0.012;
+                    break;
+            }
+            
+            // Clear the persistence buffers for immediate effect
+            if (this.oscilloscopeBuffers.initialized) {
+                const ctx1 = this.oscilloscopeBuffers.persistenceCtx;
+                const ctx2 = this.oscilloscopeBuffers.persistenceCtxLong;
+                
+                if (ctx1) ctx1.clearRect(0, 0, this.width, this.height);
+                if (ctx2) ctx2.clearRect(0, 0, this.width, this.height);
+            }
+        }
+        
+        // Return current phosphor type if it's an active visualization
+        if (this.currentVisual === 'oscilloscope-stereo') {
+            return phosphorType;
+        }
+    }
+    
+    /**
+     * Get current oscilloscope phosphor type
+     * @returns {string} Current phosphor type
+     */
+    getOscilloscopePhosphorType() {
+        return this.oscilloscopeBuffers ? this.oscilloscopeBuffers.phosphorType : 'p7';
     }
 }

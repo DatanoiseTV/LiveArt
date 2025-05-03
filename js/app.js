@@ -321,8 +321,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (presetSelector) {
             const selectedValue = presetSelector.value;
             
-            // Special case for oscilloscope which uses the 2D renderer despite having webgl- prefix
-            const isOscilloscope = selectedValue === 'webgl-crtOscilloscope';
+            // Special cases for oscilloscopes which use the 2D renderer
+            const isOscilloscope = selectedValue === 'webgl-crtOscilloscope' || 
+                                   selectedValue === 'oscilloscope-stereo';
             const isWebGLVisual = selectedValue.startsWith('webgl-') && !isOscilloscope;
             
             if (isWebGLVisual) {
@@ -333,9 +334,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 webglEngine.start();
                 isWebGL = true;
             } else {
-                // Start 2D visuals (including oscilloscope which is handled as a 2D visual)
-                if (isOscilloscope) {
+                // Start 2D visuals (including oscilloscopes which are handled as 2D visuals)
+                if (selectedValue === 'webgl-crtOscilloscope') {
+                    // The old "edgy" oscilloscope
                     visualEngine.setVisual('oscilloscope');
+                } else if (selectedValue === 'oscilloscope-stereo') {
+                    // The new stereo audio oscilloscope
+                    visualEngine.setVisual('oscilloscope-stereo');
                 } else {
                     visualEngine.setVisual(selectedValue);
                 }
@@ -718,8 +723,9 @@ document.addEventListener('DOMContentLoaded', () => {
     presetSelector.addEventListener('change', (e) => {
         const selectedValue = e.target.value;
         
-        // Special case for oscilloscope which uses the 2D renderer despite having webgl- prefix
-        const isOscilloscope = selectedValue === 'webgl-crtOscilloscope';
+        // Special cases for oscilloscopes which use the 2D renderer
+        const isOscilloscope = selectedValue === 'webgl-crtOscilloscope' || 
+                               selectedValue === 'oscilloscope-stereo';
         
         // Handle oscilloscope as a special case, everything else as normal
         const isWebGLVisual = selectedValue.startsWith('webgl-') && !isOscilloscope;
@@ -1655,6 +1661,24 @@ document.addEventListener('DOMContentLoaded', () => {
             presetSelect.dispatchEvent(new Event('change'));
             // Save settings after changing preset
             setTimeout(saveCurrentSettings, 500);
+        }
+        
+        // Phosphor type switching for oscilloscope (P1, P7, P3 keys)
+        // These match actual CRT phosphor designations used in analog oscilloscopes
+        if (visualEngine.currentVisual === 'oscilloscope-stereo') {
+            if (e.key === '1' && e.altKey) {
+                visualEngine.setOscilloscopePhosphorType('p1'); // Green P1 phosphor
+                showNotification('P1 phosphor: Green medium-persistence');
+                throttledSave();
+            } else if (e.key === '7' && e.altKey) {
+                visualEngine.setOscilloscopePhosphorType('p7'); // Blue-yellow P7 phosphor
+                showNotification('P7 phosphor: Blue-yellow long-persistence');
+                throttledSave();
+            } else if (e.key === '3' && e.altKey) {
+                visualEngine.setOscilloscopePhosphorType('p31'); // Bright green P31 phosphor
+                showNotification('P31 phosphor: Bright green fast-decay');
+                throttledSave();
+            }
         }
         
         // F key for fullscreen
