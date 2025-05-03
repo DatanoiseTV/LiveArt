@@ -60,8 +60,12 @@ canvas {
     transition: transform 0.1s ease, background-color 0.3s ease;
 }
 
+.indicator.available {
+    background-color: #ff9800; /* Orange to show devices available but not connected */
+}
+
 .indicator.connected {
-    background-color: #0f0;
+    background-color: #0f0; /* Green for connected */
 }
 
 .indicator.pulse {
@@ -199,8 +203,14 @@ select:focus {
     opacity: 1;
 }
 
-/* Help button */
-.help-toggle button {
+/* Settings Controls */
+.settings-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.reset-button, .help-button {
     background-color: #444;
     color: #fff;
     border: none;
@@ -216,8 +226,16 @@ select:focus {
     transition: background-color 0.2s ease;
 }
 
-.help-toggle button:hover {
+.reset-button:hover, .help-button:hover {
     background-color: #666;
+}
+
+.reset-button {
+    background-color: #ff5722;
+}
+
+.reset-button:hover {
+    background-color: #f44336;
 }
 
 /* Help panel */
@@ -549,5 +567,29 @@ kbd {
 @keyframes fade-out {
     0% { opacity: 1; }
     70% { opacity: 1; }
+    100% { opacity: 0; }
+}
+
+/* Notification */
+.notification {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background-color: rgba(0, 0, 0, 0.9);
+    color: white;
+    padding: 15px 25px;
+    border-radius: 5px;
+    font-weight: bold;
+    z-index: 9999;
+    box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+    animation: fade-in-out 1.5s forwards;
+    text-align: center;
+}
+
+@keyframes fade-in-out {
+    0% { opacity: 0; }
+    10% { opacity: 1; }
+    90% { opacity: 1; }
     100% { opacity: 0; }
 }

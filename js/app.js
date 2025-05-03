@@ -344,6 +344,37 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 10000);
     }
     
+    // Function to reset all settings to defaults
+    function resetToDefaults() {
+        if (!confirm('This will reset all settings to defaults. Are you sure?')) {
+            return;
+        }
+        
+        // Clear all saved settings
+        localStorage.removeItem('liveArtLastSettings');
+        localStorage.removeItem('liveArtUserPresets');
+        localStorage.removeItem('liveArtMidiMappings');
+        localStorage.removeItem('liveArtLiveMode');
+        localStorage.removeItem('liveArtCCMapPresets');
+        
+        // Show success notification
+        const notification = document.createElement('div');
+        notification.className = 'notification';
+        notification.textContent = 'Settings reset to defaults. Reloading...';
+        document.body.appendChild(notification);
+        
+        // Reload the page after a short delay
+        setTimeout(() => {
+            window.location.reload();
+        }, 1500);
+    }
+    
+    // Setup reset defaults button
+    const resetDefaultsButton = document.getElementById('reset-defaults');
+    if (resetDefaultsButton) {
+        resetDefaultsButton.addEventListener('click', resetToDefaults);
+    }
+    
     // Setup control visibility events
     showControlsButton.addEventListener('click', toggleControls);
     controls.addEventListener('mousemove', resetControlsTimeout);
