@@ -1753,19 +1753,23 @@ class WebGLVisuals {
     createParticleTexture() {
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
-        const size = 128;
+        const size = 256; // Larger for better quality
         canvas.width = size;
         canvas.height = size;
         
-        // Create a radial gradient for glow effect
+        // Create a radial gradient for phosphor glow effect
+        // More intense in center for that classic CRT look
         const gradient = ctx.createRadialGradient(
             size/2, size/2, 0,
             size/2, size/2, size/2
         );
-        gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
-        gradient.addColorStop(0.2, 'rgba(255, 255, 255, 0.8)');
-        gradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.3)');
-        gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        
+        // Brighter, more saturated center for oscilloscope dots
+        gradient.addColorStop(0, 'rgba(230, 255, 230, 1.0)');    // Bright core
+        gradient.addColorStop(0.1, 'rgba(150, 255, 150, 0.9)');  // Green phosphor
+        gradient.addColorStop(0.3, 'rgba(80, 255, 80, 0.8)');    // Medium glow
+        gradient.addColorStop(0.6, 'rgba(40, 220, 40, 0.3)');    // Outer glow
+        gradient.addColorStop(1, 'rgba(20, 100, 20, 0.0)');      // Fade out
         
         ctx.fillStyle = gradient;
         ctx.fillRect(0, 0, size, size);
@@ -3611,45 +3615,100 @@ class WebGLVisuals {
         const screenMesh = new THREE.Mesh(screenGeometry, screenMaterial);
         frameGroup.add(screenMesh);
         
-        // Add screen grid lines
+        // Add screen grid lines - more visible like in the reference
         const gridMaterial = new THREE.LineBasicMaterial({ 
-            color: darkGreen,
+            color: new THREE.Color(0x00aa00), // Brighter green for grid
             transparent: true,
             opacity: 0.3
         });
         
-        // Create horizontal grid lines
+        // Create separate groups for major and minor grid lines
         const horizontalGrid = new THREE.Group();
         const verticalGrid = new THREE.Group();
+        const majorHorizontalGrid = new THREE.Group(); // For center line
+        const majorVerticalGrid = new THREE.Group();   // For center line
         frameGroup.add(horizontalGrid);
         frameGroup.add(verticalGrid);
+        frameGroup.add(majorHorizontalGrid);
+        frameGroup.add(majorVerticalGrid);
         
-        // Grid spacing
-        const gridSpacing = 1;
+        // Smaller grid spacing for more detailed grid like in the reference
+        const gridSpacing = 0.5;
+        
+        // Create major center lines (brighter)
+        const majorGridMaterial = new THREE.LineBasicMaterial({
+            color: new THREE.Color(0x00cc00),
+            transparent: true,
+            opacity: 0.4,
+            linewidth: 2
+        });
         
         // Create horizontal grid lines
         for (let y = -screenHeight/2; y <= screenHeight/2; y += gridSpacing) {
+            // Skip center line - will be drawn as major line
+            if (Math.abs(y) < 0.01) continue;
+            
             const gridGeo = new THREE.BufferGeometry();
             const points = [
                 new THREE.Vector3(-screenWidth/2, y, 0.01),
                 new THREE.Vector3(screenWidth/2, y, 0.01)
             ];
             gridGeo.setFromPoints(points);
-            const line = new THREE.Line(gridGeo, gridMaterial);
+            
+            // Use different opacity based on position for variation
+            const lineOpacity = Math.abs(y) % 2 < 0.1 ? 0.4 : 0.2; // Brighter on even units
+            const lineMaterial = new THREE.LineBasicMaterial({
+                color: gridMaterial.color,
+                transparent: true,
+                opacity: lineOpacity
+            });
+            
+            const line = new THREE.Line(gridGeo, lineMaterial);
             horizontalGrid.add(line);
         }
         
         // Create vertical grid lines
         for (let x = -screenWidth/2; x <= screenWidth/2; x += gridSpacing) {
+            // Skip center line - will be drawn as major line
+            if (Math.abs(x) < 0.01) continue;
+            
             const gridGeo = new THREE.BufferGeometry();
             const points = [
                 new THREE.Vector3(x, -screenHeight/2, 0.01),
                 new THREE.Vector3(x, screenHeight/2, 0.01)
             ];
             gridGeo.setFromPoints(points);
-            const line = new THREE.Line(gridGeo, gridMaterial);
+            
+            // Use different opacity based on position for variation
+            const lineOpacity = Math.abs(x) % 2 < 0.1 ? 0.4 : 0.2; // Brighter on even units
+            const lineMaterial = new THREE.LineBasicMaterial({
+                color: gridMaterial.color,
+                transparent: true,
+                opacity: lineOpacity
+            });
+            
+            const line = new THREE.Line(gridGeo, lineMaterial);
             verticalGrid.add(line);
         }
+        
+        // Add major center lines (X=0 and Y=0 axis)
+        // Horizontal center line
+        const hMajorGeo = new THREE.BufferGeometry();
+        hMajorGeo.setFromPoints([
+            new THREE.Vector3(-screenWidth/2, 0, 0.02),
+            new THREE.Vector3(screenWidth/2, 0, 0.02)
+        ]);
+        const hMajorLine = new THREE.Line(hMajorGeo, majorGridMaterial);
+        majorHorizontalGrid.add(hMajorLine);
+        
+        // Vertical center line
+        const vMajorGeo = new THREE.BufferGeometry();
+        vMajorGeo.setFromPoints([
+            new THREE.Vector3(0, -screenHeight/2, 0.02),
+            new THREE.Vector3(0, screenHeight/2, 0.02)
+        ]);
+        const vMajorLine = new THREE.Line(vMajorGeo, majorGridMaterial);
+        majorVerticalGrid.add(vMajorLine);
         
         // Create phosphor particle system for the oscilloscope trace
         const particleCount = 2000; // High count for smoother trace
@@ -3942,6 +4001,12 @@ class WebGLVisuals {
         this.objects.screenDark = screenDark;
         this.objects.audioHelper = audioHelper;
         
+        // Store grid objects for animation
+        this.objects.horizontalGrid = horizontalGrid;
+        this.objects.verticalGrid = verticalGrid;
+        this.objects.majorHorizontalGrid = majorHorizontalGrid;
+        this.objects.majorVerticalGrid = majorVerticalGrid;
+        
         // Set up particle behavior parameters
         this.objects.phosphorParams = {
             persistence: 0.97,         // How long the phosphor "remembers" the signal
@@ -4083,29 +4148,30 @@ class WebGLVisuals {
             const gen = phosphorParams.audioGenParams;
             const t = this.time;
             
-            // Generate synthetic waveforms for demo when no audio input
+            // Generate a cosine wave pattern like in classic oscilloscopes
+            // Based on the reference image showing clean cosine pattern
             for (let i = 0; i < audioHelper.bufferSize; i++) {
-                const phase = (i / audioHelper.bufferSize) * Math.PI * 2;
+                const phase = (i / audioHelper.bufferSize) * Math.PI * 8; // Multiple cycles
                 
-                // Left channel: primary sine + modulation
-                const modL = Math.sin(phase * gen.modFreqL + t * 0.5) * gen.modDepth;
-                audioHelper.audioDataL[i] = Math.sin(phase * gen.leftFreq + t + modL) * 0.8;
+                // Left channel: clean cosine wave (X axis)
+                // Use time to slowly rotate around the circle
+                audioHelper.audioDataL[i] = Math.cos(phase + t * 0.2) * 0.8;
                 
-                // Add some harmonics for complexity
-                audioHelper.audioDataL[i] += Math.sin(phase * gen.leftFreq * 2 + t * 1.1) * 0.2;
+                // Right channel: cosine wave with phase shift (Y axis)
+                // This creates a classic Lissajous pattern like in the reference
+                audioHelper.audioDataR[i] = Math.cos(phase * 1.001 + t * 0.1) * 0.8;
                 
-                // Right channel: different phase and frequency
-                const modR = Math.sin(phase * gen.modFreqR + t * 0.7) * gen.modDepth;
-                audioHelper.audioDataR[i] = Math.sin(phase * gen.rightFreq + t * 1.3 + modR) * 0.8;
-                audioHelper.audioDataR[i] += Math.sin(phase * gen.rightFreq * 3 + t * 0.9) * 0.15;
+                // Add very subtle harmonics for some texture
+                audioHelper.audioDataL[i] += Math.cos(phase * 2 + t * 0.05) * 0.05;
+                audioHelper.audioDataR[i] += Math.cos(phase * 2 + t * 0.05) * 0.05;
                 
-                // Add some noise for realism
-                const noise = (Math.random() * 2 - 1) * gen.noiseAmount;
+                // Add extremely subtle noise for CRT realism (much less than before)
+                const noise = (Math.random() * 2 - 1) * 0.01;
                 audioHelper.audioDataL[i] += noise;
                 audioHelper.audioDataR[i] += noise;
                 
-                // Generate some fake frequency data for color modulation
-                audioHelper.freqDataL[i] = (0.3 + 0.7 * Math.abs(audioHelper.audioDataL[i]));
+                // Generate frequency data for brightness modulation
+                audioHelper.freqDataL[i] = 0.8 + 0.2 * Math.abs(audioHelper.audioDataL[i]);
             }
         }
         
@@ -4136,26 +4202,29 @@ class WebGLVisuals {
             particlePositions[i3 + 1] = yPos;
             
             // Update particle size based on position (larger in center)
+            // Adjust size based on position - classic oscilloscope look has consistent dot size
             const distFromCenter = Math.sqrt(xPos * xPos + yPos * yPos);
             const normalizedDist = Math.min(1, distFromCenter / (screenWidth * 0.5));
-            const sizeFactor = 1 - normalizedDist * 0.5; // Smaller at edges
+            // For classic green scope, keep dots more uniform in size for that authentic look
+            const sizeFactor = 0.9; // Consistent size for all points
             
             // Apply size parameter 
             particleSizes[i] = phosphorParams.pointSize * sizeFactor;
             
-            // For primary trace, always fully visible
-            particleOpacities[i] = 0.9 + flicker;
+            // For primary trace, make dots bright and clear like in the reference
+            particleOpacities[i] = 1.0 + flicker;
             
             // Get color based on frequency data (if available)
             // Use the frequency data for a more dynamic color effect
             let freqVal = audioHelper.getSample(audioHelper.freqDataL, sampleIdx * 0.5);
             
-            // Adjust the hue slightly based on frequency content
-            const dotHue = (0.33 + hue * 0.1 + freqVal * 0.05) % 1;
-            const dotSat = 0.9;
-            const dotBright = intensity * (0.8 + freqVal * 0.2);
+            // For classic green oscilloscope look, keep color more consistent
+            // Traditional phosphor green is around ~530nm wavelength (hue ~0.33)
+            const dotHue = 0.33; // Pure green for authentic phosphor look
+            const dotSat = 1.0;  // Fully saturated
+            const dotBright = intensity * 0.9 + freqVal * 0.1; // Mostly consistent brightness
             
-            // Create color for this dot
+            // Create color for this dot - true phosphor green
             const color = this.hsvToThree(dotHue, dotSat, dotBright);
             
             // Update particle colors
