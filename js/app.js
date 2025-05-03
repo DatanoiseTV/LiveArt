@@ -2,6 +2,10 @@
  * LiveArt - Web-based VJ Tool
  * Main application that connects MIDI to visuals
  */
+
+// Initialize global MIDI mapping state
+let MIDI_MAPPINGS = {}; // Will be populated with defaults or from localStorage
+
 document.addEventListener('DOMContentLoaded', () => {
     // Initialize main components
     const visualEngine = new VisualEngine('visualizer');
@@ -813,9 +817,9 @@ document.addEventListener('DOMContentLoaded', () => {
         return presets[presetName] || presets.particles;
     }
     
-    // Define MIDI CC mappings with better descriptions
+    // Define default MIDI CC mappings with better descriptions
     // Store these in an object that we can persist to localStorage
-    let MIDI_MAPPINGS = {
+    MIDI_MAPPINGS = {
         // Core parameters
         1: { param: 'hue', name: 'Color Hue' },
         2: { param: 'saturation', name: 'Color Saturation' },
@@ -1808,6 +1812,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     function updateMappingTable() {
+        // Make sure mappingTable is available
+        if (!mappingTable) {
+            console.error('Mapping table not found! Unable to update MIDI mappings display.');
+            return;
+        }
+        
+        console.log('Updating mapping table with', Object.keys(MIDI_MAPPINGS).length, 'mappings');
+        
         // Clear existing rows
         mappingTable.innerHTML = '';
         
