@@ -10,6 +10,7 @@ class MidiController {
         this.anyControlChangeCallback = null;
         this.programChangeCallback = null;
         this.connected = false;
+        this.boundMidiMessageHandler = null;
         
         // Initialize MIDI if available
         this.init();
@@ -31,8 +32,35 @@ class MidiController {
         // Set up event handlers
         this.midiAccess.addEventListener('statechange', this.onStateChange.bind(this));
         
-        // Initialize input dropdown
+        // Initialize input dropdown with all available devices
         this.updateDeviceList();
+        
+        // Auto-select the first MIDI device if available
+        this.autoSelectFirstDevice();
+    }
+    
+    autoSelectFirstDevice() {
+        if (!this.midiAccess || this.midiAccess.inputs.size === 0) return;
+        
+        // Get the first device
+        const firstDevice = this.midiAccess.inputs.values().next().value;
+        if (firstDevice) {
+            // Select it in the dropdown
+            const dropdown = document.getElementById('midi-input');
+            if (dropdown) {
+                dropdown.value = firstDevice.id;
+                // Trigger change event to connect to it
+                this.selectInput(firstDevice.id);
+                
+                // Update UI with selected device name
+                const deviceLabel = document.querySelector('.midi-status span');
+                if (deviceLabel) {
+                    deviceLabel.textContent = firstDevice.name;
+                }
+                
+                console.log(`Auto-connected to MIDI input: ${firstDevice.name}`);
+            }
+        }
     }
     
     onMIDIFailure(error) {
@@ -67,8 +95,13 @@ class MidiController {
             }
         }
         
+        // Remove previous event listener if it exists
+        if (dropdown._changeHandler) {
+            dropdown.removeEventListener('change', dropdown._changeHandler);
+        }
+        
         // Set up change listener
-        dropdown.addEventListener('change', (e) => {
+        dropdown._changeHandler = (e) => {
             const success = this.selectInput(e.target.value);
             
             // Update UI with selected device name
@@ -80,20 +113,27 @@ class MidiController {
                     deviceLabel.textContent = 'MIDI';
                 }
             }
-        });
+        };
+        
+        dropdown.addEventListener('change', dropdown._changeHandler);
     }
     
     selectInput(inputId) {
         // Disconnect current input if any
         if (this.midiInput) {
-            this.midiInput.removeEventListener('midimessage', this.onMIDIMessage.bind(this));
+            // Store reference to bound handler
+            if (this.boundMidiMessageHandler) {
+                this.midiInput.removeEventListener('midimessage', this.boundMidiMessageHandler);
+            }
         }
         
         // Connect to selected input
         if (inputId && this.midiAccess) {
             this.midiInput = this.midiAccess.inputs.get(inputId);
             if (this.midiInput) {
-                this.midiInput.addEventListener('midimessage', this.onMIDIMessage.bind(this));
+                // Create and store a new bound handler
+                this.boundMidiMessageHandler = this.onMIDIMessage.bind(this);
+                this.midiInput.addEventListener('midimessage', this.boundMidiMessageHandler);
                 console.log(`Connected to MIDI input: ${this.midiInput.name}`);
                 
                 // Update UI to show connected state
