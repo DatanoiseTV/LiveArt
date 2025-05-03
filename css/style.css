@@ -73,10 +73,46 @@ canvas {
     opacity: 0.8;
 }
 
+/* Parameter activity indicator */
+.param-activity {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: #333;
+    margin-left: 8px;
+    margin-right: 4px;
+    vertical-align: middle;
+    transition: background-color 0.1s ease;
+    position: relative;
+    border: 1px solid #444;
+}
+
+.param-activity.active {
+    background-color: #4CAF50;
+    box-shadow: 0 0 6px #4CAF50;
+    border-color: #4CAF50;
+    z-index: 5;
+    animation: param-pulse 0.7s ease-out;
+}
+
+@keyframes param-pulse {
+    0% { transform: scale(1); background-color: #4CAF50; box-shadow: 0 0 5px #4CAF50; }
+    40% { transform: scale(1.75); background-color: #8BC34A; box-shadow: 0 0 10px #8BC34A; }
+    100% { transform: scale(1); background-color: #333; box-shadow: 0 0 0px #333; }
+}
+
 @keyframes pulse {
     0% { transform: scale(1); opacity: 1; }
     50% { transform: scale(1.5); opacity: 0.7; }
     100% { transform: scale(1); opacity: 1; }
+}
+
+/* Animation for MIDI retry status */
+@keyframes pulse-text {
+    0% { opacity: 1; }
+    50% { opacity: 0.5; }
+    100% { opacity: 1; }
 }
 
 .preset-selector,
@@ -126,6 +162,19 @@ canvas {
 .rescan-midi-button:hover {
     background-color: #666;
     transform: rotate(90deg);
+}
+
+/* MIDI retry status indicator */
+#midi-retry-status {
+    font-size: 0.9em;
+    color: #ff9800;
+    margin-top: 5px;
+    transition: opacity 1s ease;
+    font-style: italic;
+}
+
+#midi-retry-status.pulsing {
+    animation: pulse-text 1.5s infinite;
 }
 
 select {
@@ -340,24 +389,28 @@ select:focus {
     margin-right: 10px;
     cursor: pointer;
     transition: height 0.2s, background-color 0.2s;
+    border: 1px solid #444;
 }
 
 .value-bar:hover {
     height: 10px;
     background-color: #444;
+    border-color: #555;
 }
 
 .value-bar:active {
     height: 12px;
     background-color: #555;
+    border-color: #666;
 }
 
 .value-fill {
     height: 100%;
     background-color: #4CAF50;
     width: 0%;
-    transition: width 0.2s;
+    transition: width 0.15s ease-out !important; /* Important to override inline styles */
     position: relative;
+    box-shadow: 0 0 4px rgba(76, 175, 80, 0.5) inset;
 }
 
 .value-fill::after {

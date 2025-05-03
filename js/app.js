@@ -352,6 +352,8 @@ document.addEventListener('DOMContentLoaded', () => {
         
         clearTimeout(controlsTimeout);
         controls.classList.remove('hidden');
+        
+        // Set timeout to hide controls after 10 seconds of inactivity
         controlsTimeout = setTimeout(() => {
             controls.classList.add('hidden');
         }, 10000);
@@ -1041,13 +1043,18 @@ document.addEventListener('DOMContentLoaded', () => {
         const mapping = MIDI_MAPPINGS[ccNumber];
         if (!mapping) return;
         
+        // Debug to ensure we're receiving MIDI messages
+        console.log(`MIDI CC${ccNumber} (${mapping.name}): ${value.toFixed(2)}`);
+        
+        // ALWAYS flash the activity LED, even if the panel isn't visible
+        // so we can see it when we open the panel
+        flashActivityLED(ccNumber);
+        
         // Update the mapping table values if it's visible
         if (helpPanelElement.classList.contains('active')) {
             // Small delay to let the engine update first
             setTimeout(updateMappingValues, 10);
         }
-        
-        console.log(`CC ${ccNumber} (${mapping.name}): ${value.toFixed(2)}`);
         
         // Handle special action mappings
         if (mapping.param === 'special') {
@@ -1454,9 +1461,27 @@ document.addEventListener('DOMContentLoaded', () => {
             if (isWebGL) {
                 webglEngine.effectsEnabled = !webglEngine.effectsEnabled;
                 console.log(`3D Effects: ${webglEngine.effectsEnabled ? 'Enabled' : 'Disabled'}`);
+                
+                // Show visual confirmation
+                const notification = document.createElement('div');
+                notification.className = 'notification';
+                notification.textContent = `3D Effects: ${webglEngine.effectsEnabled ? 'Enabled' : 'Disabled'}`;
+                document.body.appendChild(notification);
+                setTimeout(() => {
+                    if (notification.parentNode) notification.parentNode.removeChild(notification);
+                }, 1500);
             } else {
                 visualEngine.effectsEnabled = !visualEngine.effectsEnabled;
                 console.log(`2D Effects: ${visualEngine.effectsEnabled ? 'Enabled' : 'Disabled'}`);
+                
+                // Show visual confirmation
+                const notification = document.createElement('div');
+                notification.className = 'notification';
+                notification.textContent = `2D Effects: ${visualEngine.effectsEnabled ? 'Enabled' : 'Disabled'}`;
+                document.body.appendChild(notification);
+                setTimeout(() => {
+                    if (notification.parentNode) notification.parentNode.removeChild(notification);
+                }, 1500);
             }
             
             // Save settings after toggling effects
@@ -1641,11 +1666,33 @@ document.addEventListener('DOMContentLoaded', () => {
     function toggleHelpPanel() {
         helpPanelElement.classList.toggle('active');
         if (helpPanelElement.classList.contains('active')) {
+            // Update the mapping table
             updateMappingTable();
             
             // Start periodic update of values
             if (mappingValuesTimer) clearInterval(mappingValuesTimer);
-            mappingValuesTimer = setInterval(updateMappingValues, 1000); // Update once per second
+            mappingValuesTimer = setInterval(updateMappingValues, 50); // Update faster for smoother display
+            
+            // Handle any pending LED flashes that happened while panel was closed
+            setTimeout(() => {
+                if (window._pendingFlashes && window._pendingFlashes.length > 0) {
+                    // Process only flashes that happened in the last 5 seconds
+                    const recentTime = Date.now() - 5000;
+                    const recentFlashes = window._pendingFlashes.filter(f => f.time > recentTime);
+                    
+                    // Flash each pending CC number
+                    const flashedCCs = new Set();
+                    recentFlashes.forEach(flash => {
+                        if (!flashedCCs.has(flash.ccNumber)) {
+                            flashActivityLED(flash.ccNumber);
+                            flashedCCs.add(flash.ccNumber);
+                        }
+                    });
+                    
+                    // Clear the pending flashes
+                    window._pendingFlashes = [];
+                }
+            }, 100); // Short delay to ensure the table is fully updated
         } else {
             // Stop periodic update when panel is closed
             if (mappingValuesTimer) {
@@ -1780,52 +1827,142 @@ document.addEventListener('DOMContentLoaded', () => {
         // Loop through all rows in the mapping table
         const rows = mappingTable.querySelectorAll('tr');
         rows.forEach(row => {
-            // Get parameter info
-            const paramName = row.querySelector('td:first-child')?.textContent;
-            const ccCell = row.querySelector('td:nth-child(2)');
+            // Get parameter info - need to handle the fact that we added an LED next to the name
+            const paramCell = row.querySelector('td:first-child');
+            if (!paramCell) return;
+            
+            // Extract the parameter name ignoring the LED indicator
+            let paramName;
+            // Try to get the span that contains just the text
+            const nameSpan = paramCell.querySelector('span');
+            if (nameSpan) {
+                paramName = nameSpan.textContent;
+            } else {
+                // Fallback to cell text content
+                paramName = paramCell.textContent;
+            }
+            
             const valueCell = row.querySelector('td:nth-child(3)');
+            if (!paramName || !valueCell) return;
             
-            if (!paramName || !ccCell || !valueCell) return;
+            // Get the parameter value UI elements - need to follow the exact structure from updateMappingTable
+            const parameterValue = valueCell.querySelector('.parameter-value');
             
-            // Get the CC number
-            const ccNumber = ccCell.textContent;
-            if (!ccNumber || ccNumber === 'None') return;
+            // If no parameter value container, this might be a special parameter
+            if (!parameterValue) return;
             
-            // Update the value display
-            const valueBar = valueCell.querySelector('.value-bar');
-            const fill = valueCell.querySelector('.value-fill');
-            const text = valueCell.querySelector('.value-text');
+            // Get the value bar, fill, and text from the parameter value container
+            const bar = parameterValue.querySelector('.value-bar');
+            const fill = bar ? bar.querySelector('.value-fill') : null;
+            const text = parameterValue.querySelector('.value-text');
             
-            if (!valueBar || !fill || !text) return;
+            // If any of these elements are missing, we can't update
+            if (!bar || !fill || !text) {
+                console.warn('Missing UI elements for parameter:', paramName);
+                return;
+            }
             
             // Get the current value based on which engine is active
-            const paramConfig = AVAILABLE_PARAMETERS.find(p => p.name === paramName);
-            if (!paramConfig) return;
+            // Clean the parameter name to handle any whitespace issues
+            const cleanParamName = paramName.trim();
+            const paramConfig = AVAILABLE_PARAMETERS.find(p => p.name === cleanParamName);
+            
+            if (!paramConfig) {
+                console.warn(`No configuration found for parameter: "${cleanParamName}"`);
+                // Debug logging to find matching parameters
+                console.log('Available parameters:', AVAILABLE_PARAMETERS.map(p => p.name));
+                return;
+            }
             
             let value = 0;
+            let found = false;
+            
             // Check in the right place based on parameter type
             if (paramConfig.param === 'special') {
                 // Special parameters may not have a direct value representation
                 return;
-            } else if (typeof visualEngine?.params?.[paramConfig.param] !== 'undefined') {
-                value = visualEngine.params[paramConfig.param];
-            } else if (typeof visualEngine?.effectParams?.[paramConfig.param] !== 'undefined') {
-                value = visualEngine.effectParams[paramConfig.param];
-            } else if (typeof webglEngine?.params?.[paramConfig.param] !== 'undefined') {
-                value = webglEngine.params[paramConfig.param];
-            } else if (typeof webglEngine?.effectParams?.[paramConfig.param] !== 'undefined') {
-                value = webglEngine.effectParams[paramConfig.param];
+            } 
+            
+            // First check the active engine's params
+            if (isWebGL) {
+                // Check WebGL engine first
+                if (typeof webglEngine?.params?.[paramConfig.param] !== 'undefined') {
+                    value = webglEngine.params[paramConfig.param];
+                    found = true;
+                } else if (typeof webglEngine?.effectParams?.[paramConfig.param] !== 'undefined') {
+                    value = webglEngine.effectParams[paramConfig.param];
+                    found = true;
+                }
             } else {
-                return;
+                // Check Visual engine first
+                if (typeof visualEngine?.params?.[paramConfig.param] !== 'undefined') {
+                    value = visualEngine.params[paramConfig.param];
+                    found = true;
+                } else if (typeof visualEngine?.effectParams?.[paramConfig.param] !== 'undefined') {
+                    value = visualEngine.effectParams[paramConfig.param];
+                    found = true;
+                }
             }
             
-            // Update the visual display
-            let valuePercent = (value * 100).toFixed(0);
-            if (valuePercent > 100) valuePercent = 100;
-            if (valuePercent < 0) valuePercent = 0;
+            // If not found in the active engine, check the other one
+            if (!found) {
+                if (typeof visualEngine?.params?.[paramConfig.param] !== 'undefined') {
+                    value = visualEngine.params[paramConfig.param];
+                    found = true;
+                } else if (typeof visualEngine?.effectParams?.[paramConfig.param] !== 'undefined') {
+                    value = visualEngine.effectParams[paramConfig.param];
+                    found = true;
+                } else if (typeof webglEngine?.params?.[paramConfig.param] !== 'undefined') {
+                    value = webglEngine.params[paramConfig.param];
+                    found = true;
+                } else if (typeof webglEngine?.effectParams?.[paramConfig.param] !== 'undefined') {
+                    value = webglEngine.effectParams[paramConfig.param];
+                    found = true;
+                }
+            }
             
-            fill.style.width = `${valuePercent}%`;
-            text.textContent = value.toFixed(2);
+            if (!found) return;
+            
+            // Scale value if min/max are defined
+            let valuePercent;
+            if (paramConfig.min !== undefined && paramConfig.max !== undefined) {
+                const range = paramConfig.max - paramConfig.min;
+                valuePercent = ((value - paramConfig.min) / range * 100).toFixed(0);
+            } else {
+                valuePercent = (value * 100).toFixed(0);
+            }
+            
+            // Ensure value is in range
+            valuePercent = Math.max(0, Math.min(100, valuePercent));
+            
+            // Debug the progress bar update in much more detail
+            console.log(`Updating ${paramName}:
+                Value: ${value} 
+                Percent: ${valuePercent}%
+                Fill element: ${fill ? 'Found' : 'Missing'}
+                Text element: ${text ? 'Found' : 'Missing'}
+                Parameter config: ${paramConfig ? JSON.stringify(paramConfig) : 'Missing'}`);
+            
+            try {
+                // Force immediate update with no transition initially
+                fill.style.transition = 'none';
+                fill.style.width = `${valuePercent}%`;
+                
+                // Update the display value
+                if (paramConfig.integer) {
+                    text.textContent = Math.round(value);
+                } else {
+                    text.textContent = value.toFixed(2);
+                }
+                
+                // Force reflow
+                void fill.offsetWidth;
+                
+                // Re-enable transition for future updates
+                fill.style.transition = 'width 0.15s ease-out';
+            } catch (err) {
+                console.error('Error updating progress bar for', paramName, ':', err);
+            }
         });
     }
     
@@ -1903,9 +2040,41 @@ document.addEventListener('DOMContentLoaded', () => {
             // Create row
             const row = document.createElement('tr');
             
-            // Parameter name
+            // Parameter name with activity indicator
             const nameCell = document.createElement('td');
-            nameCell.textContent = paramConfig.name;
+            
+            // Create wrapper to hold the name and activity indicator together
+            const nameWrapper = document.createElement('div');
+            nameWrapper.style.display = 'flex';
+            nameWrapper.style.alignItems = 'center';
+            
+            // Add the parameter name
+            const nameText = document.createElement('span');
+            nameText.textContent = paramConfig.name;
+            nameWrapper.appendChild(nameText);
+            
+            // Add activity indicator
+            const activityLed = document.createElement('span');
+            activityLed.className = 'param-activity';
+            activityLed.dataset.param = paramConfig.param;
+            if (paramConfig.action) {
+                activityLed.dataset.action = paramConfig.action;
+            }
+            // Store the CC number as an attribute if this parameter is mapped
+            const currentMappingsForThisParam = Object.entries(MIDI_MAPPINGS).find(([_, config]) => {
+                if (config.param !== paramConfig.param) return false;
+                if (config.param === 'special' && config.action !== paramConfig.action) return false;
+                if (paramConfig.visualType && config.visualType !== paramConfig.visualType) return false;
+                return true;
+            });
+            
+            if (currentMappingsForThisParam) {
+                const [ccNumber] = currentMappingsForThisParam;
+                activityLed.dataset.ccNumber = ccNumber;
+            }
+            
+            nameWrapper.appendChild(activityLed);
+            nameCell.appendChild(nameWrapper);
             row.appendChild(nameCell);
             
             // CC Number
@@ -1945,6 +2114,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 const fill = document.createElement('div');
                 fill.className = 'value-fill';
                 fill.style.width = `${valuePercent}%`;
+                
+                // Make sure transitions are applied
+                fill.style.transition = 'width 0.15s ease-out';
+                
+                // Add fill to bar
                 bar.appendChild(fill);
                 
                 const valueText = document.createElement('div');
@@ -2054,6 +2228,13 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // Listen for the next CC message
         midiController.once((ccNumber, value) => {
+            // If MIDI connection failed or was cancelled
+            if (ccNumber === null) {
+                console.log('MIDI learn failed or was cancelled');
+                cancelLearnMode();
+                return;
+            }
+            
             console.log(`Learn mode received CC ${ccNumber}: ${value.toFixed(2)}`);
             
             if (!isLearning) {
@@ -2064,6 +2245,16 @@ document.addEventListener('DOMContentLoaded', () => {
             // Create or update the mapping
             console.log(`Mapping CC ${ccNumber} to ${learningParameter.name}`);
             mapCCToParameter(ccNumber, learningParameter);
+            
+            // Show notification for feedback
+            const notification = document.createElement('div');
+            notification.className = 'notification';
+            notification.style.backgroundColor = 'rgba(0, 128, 0, 0.9)'; // Green for success
+            notification.textContent = `Mapped CC ${ccNumber} to "${learningParameter.name}"`;
+            document.body.appendChild(notification);
+            setTimeout(() => {
+                if (notification.parentNode) notification.parentNode.removeChild(notification);
+            }, 2000);
             
             // Exit learn mode
             cancelLearnMode();
@@ -2098,7 +2289,20 @@ document.addEventListener('DOMContentLoaded', () => {
     // Function to unlearn (remove) a MIDI mapping
     function unlearnMapping(e) {
         const ccNumber = e.target.dataset.ccNumber;
-        const paramName = e.target.closest('tr').querySelector('td:first-child').textContent;
+        
+        // Get the parameter name, accounting for the activity LED
+        const paramCell = e.target.closest('tr').querySelector('td:first-child');
+        let paramName;
+        
+        // Get the parameter name from the span if available (to ignore LED)
+        const nameSpan = paramCell.querySelector('span');
+        if (nameSpan) {
+            paramName = nameSpan.textContent.trim();
+        } else {
+            paramName = paramCell.textContent.trim();
+        }
+        
+        console.log(`Unlearn requested for CC${ccNumber}: "${paramName}"`);
         
         if (ccNumber && MIDI_MAPPINGS[ccNumber]) {
             // Confirm before removing
@@ -2109,9 +2313,35 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Save mappings to localStorage
                 saveMidiMappings();
                 
+                // Show confirmation
+                const notification = document.createElement('div');
+                notification.className = 'notification';
+                notification.style.backgroundColor = 'rgba(255, 87, 34, 0.9)'; // Orange for unlearn
+                notification.textContent = `Removed mapping for "${paramName}" (CC ${ccNumber})`;
+                document.body.appendChild(notification);
+                setTimeout(() => {
+                    if (notification.parentNode) {
+                        notification.parentNode.removeChild(notification);
+                    }
+                }, 2000);
+                
                 // Update the mapping table
                 updateMappingTable();
             }
+        } else {
+            console.error(`Failed to unlearn: CC${ccNumber} not found in mappings or invalid`);
+            
+            // Show error
+            const notification = document.createElement('div');
+            notification.className = 'notification';
+            notification.style.backgroundColor = 'rgba(244, 67, 54, 0.9)'; // Red for error
+            notification.textContent = `Failed to unlearn: CC${ccNumber} not found`;
+            document.body.appendChild(notification);
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    notification.parentNode.removeChild(notification);
+                }
+            }, 2000);
         }
     }
     
@@ -2355,64 +2585,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
     
-    // Update mapping table with live values
-    function updateMappingValues() {
-        if (!helpPanelElement.classList.contains('active')) return;
-        
-        // Get mapping table reference
-        const mappingTable = document.getElementById('midi-mapping-table')?.querySelector('tbody');
-        if (!mappingTable) return;
-        
-        // Find value bars and update them
-        const rows = mappingTable.querySelectorAll('tr');
-        rows.forEach(row => {
-            const paramName = row.querySelector('td').textContent;
-            const param = AVAILABLE_PARAMETERS.find(p => p.name === paramName)?.param;
-            
-            if (!param || param === 'special') return;
-            
-            const valueCell = row.querySelector('.parameter-value');
-            if (!valueCell) return;
-            
-            const fill = valueCell.querySelector('.value-fill');
-            const text = valueCell.querySelector('.value-text');
-            if (!fill || !text) return;
-            
-            let value;
-            let found = false;
-            
-            // Check standard parameters
-            if (visualEngine.params[param] !== undefined) {
-                value = visualEngine.params[param];
-                found = true;
-            }
-            // Check visualEngine effect parameters
-            else if (visualEngine.effectParams && visualEngine.effectParams[param] !== undefined) {
-                value = visualEngine.effectParams[param];
-                found = true;
-            }
-            // Check webglEngine effect parameters
-            else if (webglEngine.effectParams && webglEngine.effectParams[param] !== undefined) {
-                value = webglEngine.effectParams[param];
-                found = true;
-            }
-            // Check 3D transform parameters directly on webglEngine
-            else if (['rotationX', 'rotationY', 'translationZ'].includes(param) && 
-                     webglEngine[param] !== undefined) {
-                value = webglEngine[param];
-                found = true;
-            }
-            
-            if (found) {
-                let valuePercent = (value * 100).toFixed(0);
-                if (valuePercent > 100) valuePercent = 100;
-                if (valuePercent < 0) valuePercent = 0;
-                
-                fill.style.width = `${valuePercent}%`;
-                text.textContent = value.toFixed(2);
-            }
-        });
-    }
+    // This is a duplicate updateMappingValues function that has been removed.
+    // The main function is defined earlier in the code.
     
     /**
      * Add drag handlers to parameter bars
@@ -2607,8 +2781,77 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     
+    // Function to flash an activity LED for a specific CC number
+    function flashActivityLED(ccNumber) {
+        // If the help panel isn't loaded yet or not visible, we need to store
+        // a flag to flash these LEDs when it becomes visible
+        if (!helpPanelElement || !helpPanelElement.classList.contains('active')) {
+            // Store the CC number in a list of pending flashes
+            window._pendingFlashes = window._pendingFlashes || [];
+            window._pendingFlashes.push({ccNumber: ccNumber, time: Date.now()});
+            
+            // Limit the size of pending flashes to avoid memory issues
+            if (window._pendingFlashes.length > 20) {
+                window._pendingFlashes.shift();
+            }
+            
+            return;
+        }
+        
+        // Find all activity LEDs that correspond to this CC number
+        const activityLEDs = document.querySelectorAll(`.param-activity[data-cc-number="${ccNumber}"]`);
+        
+        // If we don't find any, check if we need to find by parameter instead
+        if (!activityLEDs.length) {
+            // Try finding the mapping and flashing the appropriate parameter
+            const mapping = MIDI_MAPPINGS[ccNumber];
+            if (mapping) {
+                let selector = `.param-activity[data-param="${mapping.param}"]`;
+                if (mapping.action) {
+                    selector += `[data-action="${mapping.action}"]`;
+                }
+                
+                // Find by parameter instead of CC (this handles dynamic mappings better)
+                const paramLEDs = document.querySelectorAll(selector);
+                paramLEDs.forEach(led => {
+                    // Update the CC number attribute so we can find it directly next time
+                    led.dataset.ccNumber = ccNumber;
+                    
+                    // Add active class to trigger animation
+                    led.classList.add('active');
+                    
+                    // Remove active class after animation completes
+                    setTimeout(() => {
+                        led.classList.remove('active');
+                    }, 500);
+                });
+                
+                // If we found LEDs this way, we're done
+                if (paramLEDs.length > 0) {
+                    return;
+                }
+            }
+            
+            // If we still can't find appropriate LEDs, the table might need to be updated
+            console.log(`Activity LED for CC ${ccNumber} not found, updating mapping table...`);
+            updateMappingTable();
+            return;
+        }
+        
+        // Flash each found LED
+        activityLEDs.forEach(led => {
+            // Add active class to trigger animation
+            led.classList.add('active');
+            
+            // Remove active class after animation completes
+            setTimeout(() => {
+                led.classList.remove('active');
+            }, 500); // Match animation duration
+        });
+    }
+    
     // Periodically update values in the mapping table
-    setInterval(updateMappingValues, 100);
+    setInterval(updateMappingValues, 50); // Faster updates for smoother visuals
     
     // Add a help message for users
     console.info(
