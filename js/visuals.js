@@ -75,7 +75,10 @@ class VisualEngine {
             voronoi: this.renderVoronoi.bind(this),
             tentacles: this.renderTentacles.bind(this),
             circuitBoard: this.renderCircuitBoard.bind(this),
-            pixelFlow: this.renderPixelFlow.bind(this)
+            pixelFlow: this.renderPixelFlow.bind(this),
+            // Oscilloscope visualization
+            oscilloscope: this.renderOscilloscope.bind(this),
+            'webgl-crtOscilloscope': this.renderOscilloscope.bind(this)
         };
         
         // We'll initialize visualization specific state after all methods are defined
@@ -777,9 +780,10 @@ class VisualEngine {
             const AudioContext = window.AudioContext || window.webkitAudioContext;
             const audioContext = new AudioContext();
             
-            // Create analyzer
+            // Create analyzer - larger FFT size for better oscilloscope resolution
             const analyser = audioContext.createAnalyser();
-            analyser.fftSize = 256;
+            // Use larger FFT size for better oscilloscope resolution
+            analyser.fftSize = 512; // Larger size gives better time domain data
             
             // Set up data array
             const bufferLength = analyser.frequencyBinCount;
@@ -2146,5 +2150,308 @@ class VisualEngine {
         }
         
         this.ctx.restore();
+    }
+    
+    /**
+     * Render a classic green CRT oscilloscope visualization
+     * This provides a 2D canvas-based alternative to the WebGL implementation
+     */
+    renderOscilloscope() {
+        // Initialize audio if not already done
+        this.updateAudioData();
+        
+        // Get parameters
+        const hue = 0.33; // Fixed green for authentic oscilloscope look
+        const saturation = this.mapParam(this.params.saturation, 0.7, 1.0);
+        const brightness = this.mapParam(this.params.brightness, 0.6, 1.0);
+        const complexity = this.mapParam(this.params.complexity, 1, 8);
+        const speed = this.mapParam(this.params.speed, 0.2, 2.0);
+        const size = this.mapParam(this.params.size, 0.5, 2.0);
+        
+        // Clear canvas with dark background
+        this.ctx.fillStyle = 'rgba(0, 6, 0, 1)'; // Very dark green
+        this.ctx.fillRect(0, 0, this.width, this.height);
+        
+        // Draw grid
+        this.drawOscilloscopeGrid(hue, saturation, brightness);
+        
+        // Get time values for animation
+        const time = this.time * speed;
+        
+        // Create X-Y data for oscilloscope
+        // This will be different waveforms on X and Y axis to create Lissajous patterns
+        let xData = [];
+        let yData = [];
+        
+        // Check if we have actual audio data
+        let hasAudioData = this.audioData.initialized && this.audioData.dataArray && this.audioData.dataArray.length > 0;
+        
+        if (hasAudioData) {
+            // Create a time domain data array just for oscilloscope
+            // We need to get the time domain data for proper oscilloscope display
+            const analyser = this.audioData.analyser;
+            if (analyser) {
+                // Use a larger buffer for better oscilloscope resolution
+                const scopeBufferSize = analyser.fftSize;
+                const timeData = new Uint8Array(scopeBufferSize);
+                
+                // Get time domain data (waveform) for the oscilloscope
+                analyser.getByteTimeDomainData(timeData);
+                
+                // Use a subset of points for better performance
+                const pointCount = Math.min(256, scopeBufferSize / 2);
+                
+                // Use one half of the buffer for X and the other half for Y
+                // This simulates stereo input for Lissajous patterns
+                for (let i = 0; i < pointCount; i++) {
+                    // Map our loop index to the data array
+                    const xIndex = Math.floor(i * (scopeBufferSize / 2) / pointCount);
+                    const yIndex = Math.floor(i * (scopeBufferSize / 2) / pointCount) + (scopeBufferSize / 2);
+                    
+                    // Convert from 0-255 range to -1.0 to 1.0 range
+                    // 128 is the center/silence value in time domain data
+                    xData[i] = (timeData[xIndex] / 128.0 - 1.0);
+                    yData[i] = (timeData[yIndex % scopeBufferSize] / 128.0 - 1.0);
+                    
+                    // For better Lissajous patterns, apply a phase offset to Y data
+                    // This simulates the phase difference between stereo channels
+                    const phaseOffset = this.time * speed * 0.1;
+                    const oldX = xData[i];
+                    const oldY = yData[i];
+                    const cosPhase = Math.cos(phaseOffset);
+                    const sinPhase = Math.sin(phaseOffset);
+                    
+                    yData[i] = oldY * cosPhase + oldX * sinPhase * complexity * 0.2;
+                }
+            } else {
+                // If no analyzer is available, fall back to frequency data
+                const dataLength = this.audioData.dataArray.length;
+                const pointCount = Math.min(256, dataLength);
+                
+                for (let i = 0; i < pointCount; i++) {
+                    const index = Math.floor(i * dataLength / pointCount);
+                    
+                    // For X axis, use first half of audio data
+                    xData[i] = (this.audioData.dataArray[index] / 128.0 - 1.0);
+                    
+                    // For Y axis, use offset index
+                    const offsetIndex = (index + Math.floor(dataLength / 2)) % dataLength;
+                    yData[i] = (this.audioData.dataArray[offsetIndex] / 128.0 - 1.0);
+                }
+            }
+        } else {
+            // Generate synthetic waveforms for demo
+            const pointCount = 256;
+            
+            // Create X and Y data as sine/cosine waves with phase differences
+            // This produces classic Lissajous patterns
+            for (let i = 0; i < pointCount; i++) {
+                const phase = (i / pointCount) * Math.PI * 8;
+                
+                // Base frequency ratio determined by complexity parameter
+                const frequencyRatio = 1 + (complexity - 1) * 0.125;
+                
+                // Additional dynamic frequency modulation based on time
+                const dynamicRatio = frequencyRatio + Math.sin(time * 0.05) * 0.02;
+                
+                // X axis: sine wave with one frequency
+                xData[i] = Math.sin(phase + time * speed * 0.2);
+                
+                // Y axis: sine wave with different frequency for Lissajous pattern
+                yData[i] = Math.sin(phase * dynamicRatio + time * speed * 0.25);
+                
+                // Add complexity with harmonics
+                // More harmonics = more complex pattern
+                const harmonicStrength = complexity * 0.03;
+                xData[i] += Math.sin(phase * 3 + time * speed * 0.1) * harmonicStrength;
+                yData[i] += Math.sin(phase * 5 + time * speed * 0.15) * harmonicStrength;
+                
+                // Add very subtle random noise for authentic look
+                xData[i] += (Math.random() - 0.5) * 0.01;
+                yData[i] += (Math.random() - 0.5) * 0.01;
+            }
+        }
+        
+        // Draw the oscilloscope trace
+        this.drawOscilloscopeTrace(xData, yData, hue, saturation, brightness, size);
+        
+        // Add CRT effects (scan lines, vignette, etc.)
+        this.applyCRTEffects(hue, saturation, brightness);
+    }
+    
+    /**
+     * Draw the oscilloscope grid
+     */
+    drawOscilloscopeGrid(hue, saturation, brightness) {
+        const ctx = this.ctx;
+        ctx.save();
+        
+        // Grid settings
+        const gridColor = this.hsbaToRgba(hue, saturation * 0.7, brightness * 0.3, 0.3);
+        const majorGridColor = this.hsbaToRgba(hue, saturation * 0.8, brightness * 0.4, 0.4);
+        
+        // Draw minor grid lines
+        ctx.strokeStyle = gridColor;
+        ctx.lineWidth = 1;
+        
+        const gridSpacing = Math.floor(this.width / 20); // 20x20 grid
+        
+        // Vertical lines
+        ctx.beginPath();
+        for (let x = gridSpacing; x < this.width; x += gridSpacing) {
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, this.height);
+        }
+        ctx.stroke();
+        
+        // Horizontal lines
+        ctx.beginPath();
+        for (let y = gridSpacing; y < this.height; y += gridSpacing) {
+            ctx.moveTo(0, y);
+            ctx.lineTo(this.width, y);
+        }
+        ctx.stroke();
+        
+        // Draw major grid lines (center cross)
+        ctx.strokeStyle = majorGridColor;
+        ctx.lineWidth = 2;
+        
+        // Vertical center line
+        ctx.beginPath();
+        ctx.moveTo(this.width / 2, 0);
+        ctx.lineTo(this.width / 2, this.height);
+        ctx.stroke();
+        
+        // Horizontal center line
+        ctx.beginPath();
+        ctx.moveTo(0, this.height / 2);
+        ctx.lineTo(this.width, this.height / 2);
+        ctx.stroke();
+        
+        ctx.restore();
+    }
+    
+    /**
+     * Draw the oscilloscope trace with glowing effect
+     */
+    drawOscilloscopeTrace(xData, yData, hue, saturation, brightness, size) {
+        if (!xData || !yData || xData.length === 0) return;
+        
+        const ctx = this.ctx;
+        const pointCount = Math.min(xData.length, yData.length);
+        const centerX = this.width / 2;
+        const centerY = this.height / 2;
+        const scale = Math.min(this.width, this.height) * 0.4 * size;
+        
+        // Draw trace with multiple passes for glow effect
+        
+        // 1. Draw widest, dimmest outer glow
+        ctx.save();
+        ctx.strokeStyle = this.hsbaToRgba(hue, saturation * 0.7, brightness * 0.3, 0.2);
+        ctx.lineWidth = 10;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        
+        for (let i = 0; i < pointCount; i++) {
+            const x = centerX + xData[i] * scale;
+            const y = centerY + yData[i] * scale;
+            
+            if (i === 0) {
+                ctx.moveTo(x, y);
+            } else {
+                ctx.lineTo(x, y);
+            }
+        }
+        
+        ctx.stroke();
+        
+        // 2. Draw medium glow
+        ctx.strokeStyle = this.hsbaToRgba(hue, saturation * 0.8, brightness * 0.6, 0.4);
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        
+        for (let i = 0; i < pointCount; i++) {
+            const x = centerX + xData[i] * scale;
+            const y = centerY + yData[i] * scale;
+            
+            if (i === 0) {
+                ctx.moveTo(x, y);
+            } else {
+                ctx.lineTo(x, y);
+            }
+        }
+        
+        ctx.stroke();
+        
+        // 3. Draw main bright trace
+        ctx.strokeStyle = this.hsbaToRgba(hue, saturation, brightness, 0.9);
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        
+        for (let i = 0; i < pointCount; i++) {
+            const x = centerX + xData[i] * scale;
+            const y = centerY + yData[i] * scale;
+            
+            if (i === 0) {
+                ctx.moveTo(x, y);
+            } else {
+                ctx.lineTo(x, y);
+            }
+        }
+        
+        ctx.stroke();
+        
+        // 4. Draw brightest center points
+        ctx.fillStyle = this.hsbaToRgba(hue, saturation * 0.5, brightness, 1.0);
+        
+        for (let i = 0; i < pointCount; i += 4) { // Draw fewer dots for performance
+            const x = centerX + xData[i] * scale;
+            const y = centerY + yData[i] * scale;
+            
+            ctx.beginPath();
+            ctx.arc(x, y, 1, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        
+        ctx.restore();
+    }
+    
+    /**
+     * Apply CRT-like effects to the oscilloscope
+     */
+    applyCRTEffects(hue, saturation, brightness) {
+        const ctx = this.ctx;
+        
+        // Draw scan lines
+        ctx.save();
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+        const scanLineHeight = 2;
+        
+        for (let y = 0; y < this.height; y += scanLineHeight * 2) {
+            ctx.fillRect(0, y, this.width, scanLineHeight);
+        }
+        
+        // Draw vignette effect (darker corners)
+        const gradient = ctx.createRadialGradient(
+            this.width / 2, this.height / 2, 0,
+            this.width / 2, this.height / 2, this.width
+        );
+        
+        gradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
+        gradient.addColorStop(0.5, 'rgba(0, 0, 0, 0)');
+        gradient.addColorStop(1, 'rgba(0, 0, 0, 0.4)');
+        
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, this.width, this.height);
+        
+        // Add subtle CRT flicker
+        const flickerAmount = 0.03;
+        const flicker = Math.random() * flickerAmount;
+        
+        ctx.fillStyle = `rgba(0, ${Math.floor(flicker * 255)}, 0, ${flicker})`;
+        ctx.fillRect(0, 0, this.width, this.height);
+        
+        ctx.restore();
     }
 }

@@ -7,6 +7,41 @@
 let MIDI_MAPPINGS = {}; // Will be populated with defaults or from localStorage
 let mappingTable = null; // Will be initialized when DOM is ready
 
+// Function to save MIDI mappings to localStorage
+function saveMidiMappings() {
+    try {
+        localStorage.setItem('midiMappings', JSON.stringify(MIDI_MAPPINGS));
+        console.log('Saved MIDI mappings to localStorage');
+    } catch (e) {
+        console.error('Failed to save MIDI mappings:', e);
+    }
+}
+
+// Function to load MIDI mappings from localStorage
+function loadMidiMappings() {
+    try {
+        const savedMappings = localStorage.getItem('midiMappings');
+        if (savedMappings) {
+            const parsedMappings = JSON.parse(savedMappings);
+            
+            // Validate the structure
+            if (typeof parsedMappings === 'object') {
+                MIDI_MAPPINGS = parsedMappings;
+                console.log('Loaded MIDI mappings from localStorage');
+                return true;
+            } else {
+                console.error('Invalid MIDI mappings format in localStorage');
+            }
+        }
+    } catch (e) {
+        console.error('Failed to load MIDI mappings:', e);
+    }
+    
+    // Initialize with empty mappings if loading fails
+    MIDI_MAPPINGS = {};
+    return false;
+}
+
 // MIDI learning state
 let isLearning = false; // Whether we're in MIDI learn mode
 let learningParameter = null; // The parameter being mapped during learning
@@ -15,6 +50,8 @@ let learnStatus = null; // Element that shows learning status
 let cancelLearnButton = null; // Button to cancel learning
 
 document.addEventListener('DOMContentLoaded', () => {
+    console.log('DOM content loaded, initializing LiveArt application');
+    
     // Initialize main components
     const visualEngine = new VisualEngine('visualizer');
     const webglEngine = new WebGLVisuals('visualizer');
@@ -24,6 +61,11 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Live mode flag
     let isLiveMode = false;
+    
+    // Load MIDI mappings from localStorage (if available)
+    if (!loadMidiMappings()) {
+        console.log('No stored MIDI mappings found, using empty mappings');
+    }
     
     // Default values (used if no stored settings are found)
     const DEFAULT_PARAMS = {
@@ -245,7 +287,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const presetSelector = document.getElementById('visual-preset');
         if (presetSelector) {
             const selectedValue = presetSelector.value;
-            const isWebGLVisual = selectedValue.startsWith('webgl-');
+            
+            // Special case for oscilloscope which uses the 2D renderer despite having webgl- prefix
+            const isOscilloscope = selectedValue === 'webgl-crtOscilloscope';
+            const isWebGLVisual = selectedValue.startsWith('webgl-') && !isOscilloscope;
             
             if (isWebGLVisual) {
                 // Extract the actual WebGL scene name
@@ -255,8 +300,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 webglEngine.start();
                 isWebGL = true;
             } else {
-                // Start 2D visuals
-                visualEngine.setVisual(selectedValue);
+                // Start 2D visuals (including oscilloscope which is handled as a 2D visual)
+                if (isOscilloscope) {
+                    visualEngine.setVisual('oscilloscope');
+                } else {
+                    visualEngine.setVisual(selectedValue);
+                }
                 visualEngine.start();
             }
         } else {
@@ -525,9 +574,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const presetSelector = document.getElementById('visual-preset');
     presetSelector.addEventListener('change', (e) => {
         const selectedValue = e.target.value;
-        const isWebGLVisual = selectedValue.startsWith('webgl-');
         
-        // Extract the actual WebGL scene name if needed
+        // Special case for oscilloscope which uses the 2D renderer despite having webgl- prefix
+        const isOscilloscope = selectedValue === 'webgl-crtOscilloscope';
+        
+        // Handle oscilloscope as a special case, everything else as normal
+        const isWebGLVisual = selectedValue.startsWith('webgl-') && !isOscilloscope;
+        
+        // Extract the actual scene name if needed
         const webglSceneName = isWebGLVisual ? selectedValue.replace('webgl-', '') : null;
         
         // Save current parameter values from the active engine
@@ -547,10 +601,18 @@ document.addEventListener('DOMContentLoaded', () => {
             // Debug message
             console.log('Switched to WebGL:', webglSceneName, 'WebGL running:', webglEngine.isActive);
         }
-        else if (!isWebGLVisual && isWebGL) {
-            // Switching from 3D to 2D
+        else if ((!isWebGLVisual || isOscilloscope) && isWebGL) {
+            // Switching from 3D to 2D (or to oscilloscope which is 2D)
             webglEngine.stop();
-            visualEngine.setVisual(selectedValue);
+            
+            // Special handling for the oscilloscope
+            if (isOscilloscope) {
+                console.log('Using 2D renderer for oscilloscope visualization');
+                visualEngine.setVisual('oscilloscope');
+            } else {
+                visualEngine.setVisual(selectedValue);
+            }
+            
             visualEngine.start();
             isWebGL = false;
         }
@@ -569,6 +631,11 @@ document.addEventListener('DOMContentLoaded', () => {
             
             // Debug message
             console.log('Switched 3D scene, WebGL running:', webglEngine.isActive);
+        }
+        else if (isOscilloscope) {
+            // Switching to oscilloscope visualization from another 2D visualization
+            console.log('Switching to 2D oscilloscope visualization');
+            visualEngine.setVisual('oscilloscope');
         }
         else {
             // Switching between 2D visuals
@@ -820,6 +887,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 complexity: 0.6,    // Visual complexity
                 rotation: 0.05,     // Slow rotation
                 zoom: 0.8,          // Camera zoom
+                reactivity: 0.8     // High reactivity
+            },
+            'webgl-crtOscilloscope': {
+                hue: 0.33,          // Fixed green for authentic oscilloscope
+                saturation: 0.9,
+                brightness: 0.85,
+                density: 0.6,       // Grid density
+                speed: 0.4,         // Animation speed for synthetic waveforms
+                size: 0.7,          // Trace size
+                complexity: 0.7,    // Waveform complexity
+                rotation: 0,        // No rotation
+                zoom: 1.0,          // Default zoom
                 reactivity: 0.8     // High reactivity
             }
         };

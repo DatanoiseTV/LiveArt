@@ -8,7 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Three new 3D visualizers: Nebula Vortex, Energy Field (formerly Crystal Fractals), and Ocean Waves
+- New 2D Green CRT Oscilloscope visualizer with authentic phosphor glow and scan lines
+- Parameter smoothing for fluid transitions between values
+- Unlearn button to remove specific MIDI CC mappings
+- Activity LEDs next to parameters to visualize CC activity
 - Toggle floor grid visibility in 3D scenes with the 'G' key
+- Enhanced MIDI device connection with retry mechanism
+- Visual feedback for connection status
+
+### Fixed
+- Fixed auto-rotation in 3D visualizers to respect rotation=0 parameter
+- Improved oscilloscope visualization with proper time domain audio processing
+- Enhanced X/Y Lissajous patterns in oscilloscope from mono audio input
 
 ## [0.2.0] - 2023-05-03
 
