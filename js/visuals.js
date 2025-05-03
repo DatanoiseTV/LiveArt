@@ -1817,11 +1817,14 @@ class VisualEngine {
             initialized: false,
             persistenceCanvas: null,
             persistenceCtx: null,
-            persistence: 0.85, // Phosphor persistence factor (0-1)
+            persistence: 0.65, // Lower base phosphor persistence for more authentic fade (0-1)
             traceHue: 0.33, // Green phosphor
             lastFrameTime: 0,
             traceHistory: [], // Store previous trace points for ghosting
-            historyLength: 3 // Number of previous frames to keep
+            historyLength: 2, // Reduced history for less intense persistence
+            // Phosphor characteristics
+            phosphorIntensity: 0.7, // Base intensity of the phosphor glow
+            phosphorFadeExponent: 1.8 // How non-linear the phosphor fade is (higher = faster initial fade, longer tail)
         };
         
         // Map of visual names to their index for program change
@@ -2428,9 +2431,13 @@ class VisualEngine {
         this.oscilloscopeBuffers.lastFrameTime = now;
         
         // Adjust persistence dynamically based on the speed parameter
-        // Slower speed = longer phosphor persistence
-        const phosphorPersistence = 0.80 + ((1.0 - speed) * 0.15);
+        // Slower speed = longer phosphor persistence (but with a lower max for more authentic fade)
+        const phosphorPersistence = 0.60 + ((1.0 - speed) * 0.15);
         this.oscilloscopeBuffers.persistence = phosphorPersistence;
+        
+        // Also adjust phosphor characteristics based on parameters
+        this.oscilloscopeBuffers.phosphorIntensity = 0.5 + (brightness * 0.3); // Brighter settings = more intense phosphor
+        this.oscilloscopeBuffers.phosphorFadeExponent = 1.5 + (speed * 0.8); // Faster speeds = quicker initial fade
         
         // Apply phosphor fade to the persistence buffer
         this.fadePhosphorBuffer(deltaTime);
@@ -2630,21 +2637,47 @@ class VisualEngine {
     }
     
     /**
-     * Apply phosphor fade to the persistence buffer
+     * Apply phosphor fade to the persistence buffer with authentic CRT characteristics
      */
     fadePhosphorBuffer(deltaTime) {
         if (!this.oscilloscopeBuffers.initialized) return;
         
         const ctx = this.oscilloscopeBuffers.persistenceCtx;
         
-        // Calculate fade amount based on deltaTime and persistence factor
-        // This makes the fade consistent regardless of framerate
-        const fadeSpeed = 1.0 - this.oscilloscopeBuffers.persistence;
-        const fadeAmount = 1.0 - Math.pow(this.oscilloscopeBuffers.persistence, deltaTime * 30);
+        // Get phosphor characteristics
+        const persistence = this.oscilloscopeBuffers.persistence;
+        const fadeExponent = this.oscilloscopeBuffers.phosphorFadeExponent;
+        
+        // Calculate non-linear fade amount based on deltaTime and persistence factors
+        // Real CRT phosphors have a non-linear decay - fast initial fade, then a longer tail
+        // Higher fadeExponent = faster initial fade but longer persistent tail
+        
+        // Baseline fade speed based on persistence value (lower persistence = faster fade)
+        const baseFadeSpeed = 1.0 - persistence;
+        
+        // Apply non-linear fade curve using the exponent
+        // This creates a more natural phosphor-like decay
+        const fadeAmount = 1.0 - Math.pow(persistence, deltaTime * 20 * Math.pow(baseFadeSpeed, 1/fadeExponent));
         
         // Apply fade by drawing a semi-transparent black rectangle
-        ctx.fillStyle = `rgba(0, 0, 0, ${fadeAmount})`;
+        // Use a very subtle green tint in the fade for more authentic look
+        // Real phosphors don't fade to pure black immediately
+        ctx.fillStyle = `rgba(0, ${Math.floor(fadeAmount * 3)}, 0, ${fadeAmount})`;
         ctx.fillRect(0, 0, this.width, this.height);
+        
+        // For a more authentic analog look, we'll add a subtle noise texture to the fading phosphor
+        // This simulates the slight irregularities in real CRT phosphor coatings
+        if (fadeAmount < 0.3) { // Only add noise during slow fade phase
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.01)';
+            for (let i = 0; i < 5; i++) {
+                const x = Math.random() * this.width;
+                const y = Math.random() * this.height;
+                const size = 2 + Math.random() * 4;
+                ctx.beginPath();
+                ctx.arc(x, y, size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
     }
     
     /**
@@ -2798,8 +2831,11 @@ class VisualEngine {
         // Draw to main canvas with full glow effect
         drawTrace(ctx, true);
         
-        // Draw to persistence buffer with less glow for more authentic phosphor decay
+        // Draw to persistence buffer with reduced intensity for more authentic phosphor decay
+        // Use a lower opacity to make the trace less intense in the persistence buffer
+        persistenceCtx.globalAlpha = this.oscilloscopeBuffers.phosphorIntensity * 0.7;
         drawTrace(persistenceCtx, false);
+        persistenceCtx.globalAlpha = 1.0;
         
         // Draw ghosting trails from previous frames (if any)
         if (this.oscilloscopeBuffers.traceHistory.length > 0) {
@@ -2809,13 +2845,26 @@ class VisualEngine {
             
             for (let h = 0; h < this.oscilloscopeBuffers.traceHistory.length; h++) {
                 const historyItem = this.oscilloscopeBuffers.traceHistory[h];
+                
+                // Calculate age and apply non-linear fade for more authentic phosphor look
                 const age = (performance.now() - historyItem.time) / 1000; // Age in seconds
-                const opacity = Math.max(0, 0.3 - (age * 0.3)); // Fade out with age
+                
+                // Apply non-linear fade curve for historical traces
+                // Real phosphors fade quickly at first, then more slowly
+                const fadeExponent = this.oscilloscopeBuffers.phosphorFadeExponent;
+                const baseFade = Math.pow(age, 1/fadeExponent) * 2; // Non-linear fade
+                const opacity = Math.max(0, 0.15 - baseFade); // Lower starting opacity, longer tail
                 
                 if (opacity <= 0) continue;
                 
-                // Use a thinner line for ghost traces
-                persistenceCtx.strokeStyle = this.hsbaToRgba(hue, saturation * 0.7, brightness * 0.4, opacity);
+                // Use a thinner, more faded line for ghost traces
+                // Real phosphors lose saturation as they fade
+                persistenceCtx.strokeStyle = this.hsbaToRgba(
+                    hue, 
+                    saturation * 0.5 * (1 - age), // Reducing saturation with age
+                    brightness * 0.3, 
+                    opacity
+                );
                 persistenceCtx.lineWidth = 1;
                 persistenceCtx.beginPath();
                 
