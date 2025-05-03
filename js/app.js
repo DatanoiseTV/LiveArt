@@ -1565,6 +1565,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const cancelLearnButton = document.getElementById('cancel-learn');
     const resetMidiMapButton = document.getElementById('reset-midi-map');
     
+    // Setup event listeners for help panel immediately after getting the elements
+    if (helpButton && closeHelpButton) {
+        helpButton.addEventListener('click', toggleHelpPanel);
+        closeHelpButton.addEventListener('click', toggleHelpPanel);
+    } else {
+        console.warn('Help panel buttons not found - they may not be properly defined in HTML');
+    }
+    
     // Add elements for exporting/importing mappings
     const exportButton = document.createElement('button');
     exportButton.id = 'export-midi-map';
@@ -1713,13 +1721,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
     
-    // Setup event listeners for help panel
-    if (helpButton && closeHelpButton) {
-        helpButton.addEventListener('click', toggleHelpPanel);
-        closeHelpButton.addEventListener('click', toggleHelpPanel);
-    } else {
-        console.warn('Help panel buttons not found - they may not be loaded yet');
-    }
+    // Note: Event listeners for help panel are now set up immediately after the elements are defined
     
     // Also open help panel with M key
     window.addEventListener('keydown', (e) => {
