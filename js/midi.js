@@ -148,6 +148,10 @@ class MidiController {
     }
     
     selectInput(inputId) {
+        // Preserve existing callback when switching devices
+        const existingCallback = this.anyControlChangeCallback;
+        const existingProgramCallback = this.programChangeCallback;
+        
         // Disconnect current input if any
         if (this.midiInput) {
             // Store reference to bound handler
@@ -170,6 +174,15 @@ class MidiController {
                 const indicator = document.querySelector('.indicator');
                 if (indicator) {
                     indicator.classList.add('connected');
+                }
+                
+                // Restore any existing callbacks
+                if (existingCallback) {
+                    this.anyControlChangeCallback = existingCallback;
+                }
+                
+                if (existingProgramCallback) {
+                    this.programChangeCallback = existingProgramCallback;
                 }
                 
                 return true;
@@ -205,6 +218,7 @@ class MidiController {
             
             // Call any registered callbacks
             if (this.anyControlChangeCallback) {
+                console.log(`MIDI CC ${ccNumber}: ${value.toFixed(2)} - Calling callback`);
                 this.anyControlChangeCallback(ccNumber, value);
             }
         }
@@ -244,21 +258,26 @@ class MidiController {
     
     // Register a one-time callback for the next CC change
     once(callback) {
-        const originalCallback = this.anyControlChangeCallback;
+        // Store a reference to this instance for the closure
+        const self = this;
         
-        // Set a one-time callback wrapper
-        this.anyControlChangeCallback = (ccNumber, value) => {
-            // Call our one-time callback first
+        // Create a temporary message handler function
+        const tempHandler = function(ccNumber, value) {
+            // Call the callback with the CC data
             callback(ccNumber, value);
             
-            // Then call original callback if it exists
-            if (originalCallback) {
-                originalCallback(ccNumber, value);
-            }
+            // Remove this temporary handler after first execution
+            self.anyControlChangeCallback = self.originalCallback || null;
             
-            // Restore original callback
-            this.anyControlChangeCallback = originalCallback;
+            // Clear the stored reference
+            self.originalCallback = null;
         };
+        
+        // Store the original callback
+        this.originalCallback = this.anyControlChangeCallback;
+        
+        // Replace with our temporary handler
+        this.anyControlChangeCallback = tempHandler;
     }
     
     // Utility method to get a CC value

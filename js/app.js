@@ -1875,11 +1875,19 @@ document.addEventListener('DOMContentLoaded', () => {
         learnStatus.textContent = `Move a MIDI controller to map to "${learningParameter.name}"`;
         cancelLearnButton.classList.remove('hidden');
         
+        console.log(`Entering learn mode for ${learningParameter.name}`);
+        
         // Listen for the next CC message
         midiController.once((ccNumber, value) => {
-            if (!isLearning) return; // Just in case it was canceled
+            console.log(`Learn mode received CC ${ccNumber}: ${value.toFixed(2)}`);
+            
+            if (!isLearning) {
+                console.log('Learn mode was canceled, ignoring');
+                return;
+            }
             
             // Create or update the mapping
+            console.log(`Mapping CC ${ccNumber} to ${learningParameter.name}`);
             mapCCToParameter(ccNumber, learningParameter);
             
             // Exit learn mode
