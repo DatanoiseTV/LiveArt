@@ -1737,6 +1737,18 @@ class VisualEngine {
             liveAudioConnected: false
         };
         
+        // Oscilloscope persistence buffers for phosphor effect
+        this.oscilloscopeBuffers = {
+            initialized: false,
+            persistenceCanvas: null,
+            persistenceCtx: null,
+            persistence: 0.85, // Phosphor persistence factor (0-1)
+            traceHue: 0.33, // Green phosphor
+            lastFrameTime: 0,
+            traceHistory: [], // Store previous trace points for ghosting
+            historyLength: 3 // Number of previous frames to keep
+        };
+        
         // Map of visual names to their index for program change
         this.visualIndexMap = {
             'audioReactive': 0,
@@ -2329,15 +2341,24 @@ class VisualEngine {
         const speed = this.mapParam(this.params.speed, 0.2, 2.0);
         const size = this.mapParam(this.params.size, 0.5, 2.0);
         
-        // Clear canvas with dark background
-        this.ctx.fillStyle = 'rgba(0, 6, 0, 1)'; // Very dark green
-        this.ctx.fillRect(0, 0, this.width, this.height);
-        
-        // Draw grid
-        this.drawOscilloscopeGrid(hue, saturation, brightness);
+        // Initialize oscilloscope buffers if needed
+        this.initOscilloscopeBuffers();
         
         // Get time values for animation
         const time = this.time * speed;
+        
+        // Calculate fade based on time since last frame for consistent fade regardless of framerate
+        const now = performance.now();
+        const deltaTime = Math.min(100, now - this.oscilloscopeBuffers.lastFrameTime) / 1000;
+        this.oscilloscopeBuffers.lastFrameTime = now;
+        
+        // Adjust persistence dynamically based on the speed parameter
+        // Slower speed = longer phosphor persistence
+        const phosphorPersistence = 0.80 + ((1.0 - speed) * 0.15);
+        this.oscilloscopeBuffers.persistence = phosphorPersistence;
+        
+        // Apply phosphor fade to the persistence buffer
+        this.fadePhosphorBuffer(deltaTime);
         
         // Create X-Y data for oscilloscope
         // This will be different waveforms on X and Y axis to create Lissajous patterns
@@ -2465,11 +2486,90 @@ class VisualEngine {
             }
         }
         
-        // Draw the oscilloscope trace
+        // Store current trace data for history
+        if (xData.length > 0 && yData.length > 0) {
+            // Store a copy of the current data
+            this.oscilloscopeBuffers.traceHistory.unshift({
+                xData: [...xData],
+                yData: [...yData],
+                time: now
+            });
+            
+            // Limit history length
+            if (this.oscilloscopeBuffers.traceHistory.length > this.oscilloscopeBuffers.historyLength) {
+                this.oscilloscopeBuffers.traceHistory.pop();
+            }
+        }
+        
+        // Clear main canvas with dark background
+        this.ctx.fillStyle = 'rgba(0, 6, 0, 1)'; // Very dark green
+        this.ctx.fillRect(0, 0, this.width, this.height);
+        
+        // Draw grid on main canvas
+        this.drawOscilloscopeGrid(hue, saturation, brightness);
+        
+        // Draw previous frames from persistence buffer to main canvas
+        this.ctx.drawImage(this.oscilloscopeBuffers.persistenceCanvas, 0, 0);
+        
+        // Draw the current oscilloscope trace to both main canvas and persistence buffer
         this.drawOscilloscopeTrace(xData, yData, hue, saturation, brightness, size);
         
         // Add CRT effects (scan lines, vignette, etc.)
         this.applyCRTEffects(hue, saturation, brightness);
+    }
+    
+    /**
+     * Initialize oscilloscope buffers for phosphor persistence effect
+     */
+    initOscilloscopeBuffers() {
+        // Only initialize once
+        if (this.oscilloscopeBuffers.initialized) {
+            // Check if canvas dimensions have changed
+            if (this.oscilloscopeBuffers.persistenceCanvas.width !== this.width ||
+                this.oscilloscopeBuffers.persistenceCanvas.height !== this.height) {
+                // Canvas size changed, reinitialize
+                this.oscilloscopeBuffers.initialized = false;
+            } else {
+                return; // Already initialized with correct dimensions
+            }
+        }
+        
+        // Create persistence canvas for phosphor trail effect
+        const persistenceCanvas = document.createElement('canvas');
+        persistenceCanvas.width = this.width;
+        persistenceCanvas.height = this.height;
+        const persistenceCtx = persistenceCanvas.getContext('2d');
+        
+        // Clear the persistence canvas
+        persistenceCtx.fillStyle = 'rgba(0, 0, 0, 1)';
+        persistenceCtx.fillRect(0, 0, this.width, this.height);
+        
+        // Store in our buffers object
+        this.oscilloscopeBuffers.persistenceCanvas = persistenceCanvas;
+        this.oscilloscopeBuffers.persistenceCtx = persistenceCtx;
+        this.oscilloscopeBuffers.lastFrameTime = performance.now();
+        this.oscilloscopeBuffers.initialized = true;
+        
+        // Reset trace history
+        this.oscilloscopeBuffers.traceHistory = [];
+    }
+    
+    /**
+     * Apply phosphor fade to the persistence buffer
+     */
+    fadePhosphorBuffer(deltaTime) {
+        if (!this.oscilloscopeBuffers.initialized) return;
+        
+        const ctx = this.oscilloscopeBuffers.persistenceCtx;
+        
+        // Calculate fade amount based on deltaTime and persistence factor
+        // This makes the fade consistent regardless of framerate
+        const fadeSpeed = 1.0 - this.oscilloscopeBuffers.persistence;
+        const fadeAmount = 1.0 - Math.pow(this.oscilloscopeBuffers.persistence, deltaTime * 30);
+        
+        // Apply fade by drawing a semi-transparent black rectangle
+        ctx.fillStyle = `rgba(0, 0, 0, ${fadeAmount})`;
+        ctx.fillRect(0, 0, this.width, this.height);
     }
     
     /**
@@ -2525,89 +2625,145 @@ class VisualEngine {
     }
     
     /**
-     * Draw the oscilloscope trace with glowing effect
+     * Draw the oscilloscope trace with glowing phosphor effect
      */
     drawOscilloscopeTrace(xData, yData, hue, saturation, brightness, size) {
         if (!xData || !yData || xData.length === 0) return;
         
         const ctx = this.ctx;
+        const persistenceCtx = this.oscilloscopeBuffers.persistenceCtx;
         const pointCount = Math.min(xData.length, yData.length);
         const centerX = this.width / 2;
         const centerY = this.height / 2;
         const scale = Math.min(this.width, this.height) * 0.4 * size;
         
-        // Draw trace with multiple passes for glow effect
+        // Draw trace with multiple passes for glow effect on main canvas
         
-        // 1. Draw widest, dimmest outer glow
-        ctx.save();
-        ctx.strokeStyle = this.hsbaToRgba(hue, saturation * 0.7, brightness * 0.3, 0.2);
-        ctx.lineWidth = 10;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.beginPath();
-        
-        for (let i = 0; i < pointCount; i++) {
-            const x = centerX + xData[i] * scale;
-            const y = centerY + yData[i] * scale;
+        // Function to draw the trace at different glow levels
+        const drawTrace = (targetCtx, outerGlow) => {
+            // Save context state
+            targetCtx.save();
             
-            if (i === 0) {
-                ctx.moveTo(x, y);
-            } else {
-                ctx.lineTo(x, y);
+            // Set blend mode for additive blending (creates brighter overlaps for authentic CRT look)
+            targetCtx.globalCompositeOperation = 'lighter';
+            
+            if (outerGlow) {
+                // 1. Draw widest, dimmest outer glow
+                targetCtx.strokeStyle = this.hsbaToRgba(hue, saturation * 0.7, brightness * 0.3, 0.2);
+                targetCtx.lineWidth = 10;
+                targetCtx.lineCap = 'round';
+                targetCtx.lineJoin = 'round';
+                targetCtx.beginPath();
+                
+                for (let i = 0; i < pointCount; i++) {
+                    const x = centerX + xData[i] * scale;
+                    const y = centerY + yData[i] * scale;
+                    
+                    if (i === 0) {
+                        targetCtx.moveTo(x, y);
+                    } else {
+                        targetCtx.lineTo(x, y);
+                    }
+                }
+                
+                targetCtx.stroke();
+                
+                // 2. Draw medium glow
+                targetCtx.strokeStyle = this.hsbaToRgba(hue, saturation * 0.8, brightness * 0.6, 0.4);
+                targetCtx.lineWidth = 5;
+                targetCtx.beginPath();
+                
+                for (let i = 0; i < pointCount; i++) {
+                    const x = centerX + xData[i] * scale;
+                    const y = centerY + yData[i] * scale;
+                    
+                    if (i === 0) {
+                        targetCtx.moveTo(x, y);
+                    } else {
+                        targetCtx.lineTo(x, y);
+                    }
+                }
+                
+                targetCtx.stroke();
             }
-        }
-        
-        ctx.stroke();
-        
-        // 2. Draw medium glow
-        ctx.strokeStyle = this.hsbaToRgba(hue, saturation * 0.8, brightness * 0.6, 0.4);
-        ctx.lineWidth = 5;
-        ctx.beginPath();
-        
-        for (let i = 0; i < pointCount; i++) {
-            const x = centerX + xData[i] * scale;
-            const y = centerY + yData[i] * scale;
             
-            if (i === 0) {
-                ctx.moveTo(x, y);
-            } else {
-                ctx.lineTo(x, y);
+            // 3. Draw main bright trace
+            targetCtx.strokeStyle = this.hsbaToRgba(hue, saturation, brightness, 0.9);
+            targetCtx.lineWidth = 2;
+            targetCtx.beginPath();
+            
+            for (let i = 0; i < pointCount; i++) {
+                const x = centerX + xData[i] * scale;
+                const y = centerY + yData[i] * scale;
+                
+                if (i === 0) {
+                    targetCtx.moveTo(x, y);
+                } else {
+                    targetCtx.lineTo(x, y);
+                }
             }
-        }
-        
-        ctx.stroke();
-        
-        // 3. Draw main bright trace
-        ctx.strokeStyle = this.hsbaToRgba(hue, saturation, brightness, 0.9);
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        
-        for (let i = 0; i < pointCount; i++) {
-            const x = centerX + xData[i] * scale;
-            const y = centerY + yData[i] * scale;
             
-            if (i === 0) {
-                ctx.moveTo(x, y);
-            } else {
-                ctx.lineTo(x, y);
+            targetCtx.stroke();
+            
+            // 4. Draw brightest center points - creating dots for better phosphor effect
+            targetCtx.fillStyle = this.hsbaToRgba(hue, saturation * 0.5, brightness, 1.0);
+            
+            for (let i = 0; i < pointCount; i += 4) { // Draw fewer dots for performance
+                const x = centerX + xData[i] * scale;
+                const y = centerY + yData[i] * scale;
+                
+                targetCtx.beginPath();
+                targetCtx.arc(x, y, 1, 0, Math.PI * 2);
+                targetCtx.fill();
             }
-        }
-        
-        ctx.stroke();
-        
-        // 4. Draw brightest center points
-        ctx.fillStyle = this.hsbaToRgba(hue, saturation * 0.5, brightness, 1.0);
-        
-        for (let i = 0; i < pointCount; i += 4) { // Draw fewer dots for performance
-            const x = centerX + xData[i] * scale;
-            const y = centerY + yData[i] * scale;
             
-            ctx.beginPath();
-            ctx.arc(x, y, 1, 0, Math.PI * 2);
-            ctx.fill();
-        }
+            targetCtx.restore();
+        };
         
-        ctx.restore();
+        // Draw to main canvas with full glow effect
+        drawTrace(ctx, true);
+        
+        // Draw to persistence buffer with less glow for more authentic phosphor decay
+        drawTrace(persistenceCtx, false);
+        
+        // Draw ghosting trails from previous frames (if any)
+        if (this.oscilloscopeBuffers.traceHistory.length > 0) {
+            // Draw historical traces with decreasing opacity
+            persistenceCtx.save();
+            persistenceCtx.globalCompositeOperation = 'lighter';
+            
+            for (let h = 0; h < this.oscilloscopeBuffers.traceHistory.length; h++) {
+                const historyItem = this.oscilloscopeBuffers.traceHistory[h];
+                const age = (performance.now() - historyItem.time) / 1000; // Age in seconds
+                const opacity = Math.max(0, 0.3 - (age * 0.3)); // Fade out with age
+                
+                if (opacity <= 0) continue;
+                
+                // Use a thinner line for ghost traces
+                persistenceCtx.strokeStyle = this.hsbaToRgba(hue, saturation * 0.7, brightness * 0.4, opacity);
+                persistenceCtx.lineWidth = 1;
+                persistenceCtx.beginPath();
+                
+                const historyXData = historyItem.xData;
+                const historyYData = historyItem.yData;
+                const historyPointCount = Math.min(historyXData.length, historyYData.length);
+                
+                for (let i = 0; i < historyPointCount; i += 2) { // Sample fewer points for performance
+                    const x = centerX + historyXData[i] * scale;
+                    const y = centerY + historyYData[i] * scale;
+                    
+                    if (i === 0) {
+                        persistenceCtx.moveTo(x, y);
+                    } else {
+                        persistenceCtx.lineTo(x, y);
+                    }
+                }
+                
+                persistenceCtx.stroke();
+            }
+            
+            persistenceCtx.restore();
+        }
     }
     
     /**
@@ -2615,34 +2771,75 @@ class VisualEngine {
      */
     applyCRTEffects(hue, saturation, brightness) {
         const ctx = this.ctx;
-        
-        // Draw scan lines
         ctx.save();
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
-        const scanLineHeight = 2;
         
-        for (let y = 0; y < this.height; y += scanLineHeight * 2) {
+        // Add CRT bloom glow effect (bright areas bleed into surrounding areas)
+        // This is separate from the trace glow and creates a more authentic CRT phosphor look
+        ctx.filter = 'blur(1.5px)';
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = 0.3;
+        ctx.drawImage(this.canvas, 0, 0);
+        ctx.globalAlpha = 0.15;
+        ctx.filter = 'blur(3px)';
+        ctx.drawImage(this.canvas, 0, 0);
+        ctx.globalAlpha = 1.0;
+        ctx.filter = 'none';
+        ctx.globalCompositeOperation = 'source-over';
+        
+        // Draw scan lines with subtle greenish tint for authentic phosphor look
+        const scanLineColor = this.hsbaToRgba(hue, saturation * 0.2, 0, 0.15);
+        ctx.fillStyle = scanLineColor;
+        const scanLineHeight = Math.max(1, Math.floor(this.height / 350)); // Scale scan lines with canvas size
+        
+        for (let y = scanLineHeight; y < this.height; y += scanLineHeight * 2) {
             ctx.fillRect(0, y, this.width, scanLineHeight);
         }
         
-        // Draw vignette effect (darker corners)
+        // Draw vignette effect - stronger for more authentic CRT look
         const gradient = ctx.createRadialGradient(
             this.width / 2, this.height / 2, 0,
-            this.width / 2, this.height / 2, this.width
+            this.width / 2, this.height / 2, this.width * 0.75 // Smaller radius for more pronounced vignette
         );
         
         gradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
-        gradient.addColorStop(0.5, 'rgba(0, 0, 0, 0)');
-        gradient.addColorStop(1, 'rgba(0, 0, 0, 0.4)');
+        gradient.addColorStop(0.6, 'rgba(0, 0, 0, 0.05)');
+        gradient.addColorStop(0.8, 'rgba(0, 0, 0, 0.2)');
+        gradient.addColorStop(1, 'rgba(0, 0, 0, 0.5)'); // Stronger darkening at edges
         
         ctx.fillStyle = gradient;
+        ctx.globalCompositeOperation = 'multiply'; // Better blend mode for vignette
         ctx.fillRect(0, 0, this.width, this.height);
+        ctx.globalCompositeOperation = 'source-over';
         
         // Add subtle CRT flicker
-        const flickerAmount = 0.03;
-        const flicker = Math.random() * flickerAmount;
+        const flickerAmount = 0.04;
+        const time = performance.now() / 1000;
+        // Combine random flicker with subtle sine wave oscillation for more natural effect
+        const flicker = (Math.random() * flickerAmount * 0.5) + 
+                        (Math.sin(time * 7.3) * 0.01) + 
+                        (Math.sin(time * 13.7) * 0.005);
         
-        ctx.fillStyle = `rgba(0, ${Math.floor(flicker * 255)}, 0, ${flicker})`;
+        // Green tint for the flicker with the same hue as the phosphor
+        ctx.fillStyle = this.hsbaToRgba(hue, saturation * 0.3, brightness * 0.5, Math.abs(flicker));
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.fillRect(0, 0, this.width, this.height);
+        
+        // Add subtle screen curvature effect (CRT bulge)
+        // This is done by adding a subtle shadow at the corners
+        const cornerGradient = ctx.createRadialGradient(
+            this.width / 2, this.height / 2, 0,
+            this.width / 2, this.height / 2, this.width * 0.7
+        );
+        
+        cornerGradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
+        cornerGradient.addColorStop(0.7, 'rgba(0, 0, 0, 0)');
+        cornerGradient.addColorStop(0.85, 'rgba(0, 0, 0, 0.03)');
+        cornerGradient.addColorStop(1, 'rgba(0, 0, 0, 0.15)');
+        
+        ctx.fillStyle = cornerGradient;
+        ctx.globalCompositeOperation = 'multiply';
+        
+        // Apply to create subtle bulge effect
         ctx.fillRect(0, 0, this.width, this.height);
         
         ctx.restore();
