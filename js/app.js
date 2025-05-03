@@ -1714,8 +1714,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     // Setup event listeners for help panel
-    helpButton.addEventListener('click', toggleHelpPanel);
-    closeHelpButton.addEventListener('click', toggleHelpPanel);
+    if (helpButton && closeHelpButton) {
+        helpButton.addEventListener('click', toggleHelpPanel);
+        closeHelpButton.addEventListener('click', toggleHelpPanel);
+    } else {
+        console.warn('Help panel buttons not found - they may not be loaded yet');
+    }
     
     // Also open help panel with M key
     window.addEventListener('keydown', (e) => {
