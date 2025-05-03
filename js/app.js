@@ -2194,7 +2194,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
     });
-    }
     
     // Export MIDI mappings to a file
     // Only add the event listener if the button exists and is in the DOM
