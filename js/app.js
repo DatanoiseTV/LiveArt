@@ -1027,6 +1027,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const mapping = MIDI_MAPPINGS[ccNumber];
         if (!mapping) return;
         
+        // Update the mapping table values if it's visible
+        if (helpPanelElement.classList.contains('active')) {
+            // Small delay to let the engine update first
+            setTimeout(updateMappingValues, 10);
+        }
+        
         console.log(`CC ${ccNumber} (${mapping.name}): ${value.toFixed(2)}`);
         
         // Handle special action mappings
@@ -1593,59 +1599,73 @@ document.addEventListener('DOMContentLoaded', () => {
     let learningButton = null;
     
     // Toggle help panel visibility
+    // Timer for updating mapping values
+    let mappingValuesTimer = null;
+    
     function toggleHelpPanel() {
         helpPanelElement.classList.toggle('active');
         if (helpPanelElement.classList.contains('active')) {
             updateMappingTable();
             
-            // Create or update the CC Map Presets section
-            let ccMapSection = document.getElementById('cc-map-presets-section');
-            if (!ccMapSection) {
-                // Create the section if it doesn't exist
-                ccMapSection = document.createElement('div');
-                ccMapSection.id = 'cc-map-presets-section';
-                ccMapSection.className = 'cc-map-presets-section';
-                ccMapSection.style.borderTop = '1px solid rgba(255, 255, 255, 0.1)';
-                ccMapSection.style.paddingTop = '15px';
-                ccMapSection.style.marginTop = '20px';
-                ccMapSection.style.marginBottom = '20px';
+            // Start periodic update of values
+            if (mappingValuesTimer) clearInterval(mappingValuesTimer);
+            mappingValuesTimer = setInterval(updateMappingValues, 1000); // Update once per second
+        } else {
+            // Stop periodic update when panel is closed
+            if (mappingValuesTimer) {
+                clearInterval(mappingValuesTimer);
+                mappingValuesTimer = null;
+            }
+        }
+        
+        // Create or update the CC Map Presets section
+        let ccMapSection = document.getElementById('cc-map-presets-section');
+        if (!ccMapSection) {
+            // Create the section if it doesn't exist
+            ccMapSection = document.createElement('div');
+            ccMapSection.id = 'cc-map-presets-section';
+            ccMapSection.className = 'cc-map-presets-section';
+            ccMapSection.style.borderTop = '1px solid rgba(255, 255, 255, 0.1)';
+            ccMapSection.style.paddingTop = '15px';
+            ccMapSection.style.marginTop = '20px';
+            ccMapSection.style.marginBottom = '20px';
                 
                 // Create title
-                const title = document.createElement('h3');
-                title.textContent = 'MIDI CC Map Presets';
-                title.style.fontSize = '1rem';
-                title.style.marginBottom = '10px';
-                title.style.color = '#ccc';
-                ccMapSection.appendChild(title);
-                
-                // Create description
-                const description = document.createElement('p');
-                description.textContent = 'Save the current MIDI CC mappings as a named preset or load existing presets.';
-                description.style.fontSize = '0.9em';
-                description.style.marginBottom = '10px';
-                description.style.color = '#aaa';
-                ccMapSection.appendChild(description);
-                
-                // Create controls container
-                const controls = document.createElement('div');
-                controls.className = 'cc-map-preset-controls';
-                controls.style.display = 'flex';
-                controls.style.alignItems = 'center';
-                controls.style.gap = '10px';
-                controls.style.marginBottom = '15px';
-                controls.style.flexWrap = 'wrap';
-                
-                // Add name input
-                const nameInput = document.createElement('input');
-                nameInput.type = 'text';
-                nameInput.id = 'cc-map-preset-name';
-                nameInput.placeholder = 'Preset Name';
-                nameInput.style.padding = '5px 10px';
-                nameInput.style.borderRadius = '4px';
-                nameInput.style.border = '1px solid rgba(255, 255, 255, 0.2)';
-                nameInput.style.backgroundColor = '#333';
-                nameInput.style.color = '#fff';
-                controls.appendChild(nameInput);
+            const title = document.createElement('h3');
+            title.textContent = 'MIDI CC Map Presets';
+            title.style.fontSize = '1rem';
+            title.style.marginBottom = '10px';
+            title.style.color = '#ccc';
+            ccMapSection.appendChild(title);
+            
+            // Create description
+            const description = document.createElement('p');
+            description.textContent = 'Save the current MIDI CC mappings as a named preset or load existing presets.';
+            description.style.fontSize = '0.9em';
+            description.style.marginBottom = '10px';
+            description.style.color = '#aaa';
+            ccMapSection.appendChild(description);
+            
+            // Create controls container
+            const controls = document.createElement('div');
+            controls.className = 'cc-map-preset-controls';
+            controls.style.display = 'flex';
+            controls.style.alignItems = 'center';
+            controls.style.gap = '10px';
+            controls.style.marginBottom = '15px';
+            controls.style.flexWrap = 'wrap';
+            
+            // Add name input
+            const nameInput = document.createElement('input');
+            nameInput.type = 'text';
+            nameInput.id = 'cc-map-preset-name';
+            nameInput.placeholder = 'Preset Name';
+            nameInput.style.padding = '5px 10px';
+            nameInput.style.borderRadius = '4px';
+            nameInput.style.border = '1px solid rgba(255, 255, 255, 0.2)';
+            nameInput.style.backgroundColor = '#333';
+            nameInput.style.color = '#fff';
+            controls.appendChild(nameInput);
                 
                 // Add save button
                 const saveButton = document.createElement('button');
@@ -1708,6 +1728,63 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     
     // Function to update the mapping table
+    // Function to update CC values in the mapping table without recreating it
+    function updateMappingValues() {
+        // Only proceed if the help panel is visible
+        if (!helpPanelElement.classList.contains('active')) return;
+        
+        // Loop through all rows in the mapping table
+        const rows = mappingTable.querySelectorAll('tr');
+        rows.forEach(row => {
+            // Get parameter info
+            const paramName = row.querySelector('td:first-child')?.textContent;
+            const ccCell = row.querySelector('td:nth-child(2)');
+            const valueCell = row.querySelector('td:nth-child(3)');
+            
+            if (!paramName || !ccCell || !valueCell) return;
+            
+            // Get the CC number
+            const ccNumber = ccCell.textContent;
+            if (!ccNumber || ccNumber === 'None') return;
+            
+            // Update the value display
+            const valueBar = valueCell.querySelector('.value-bar');
+            const fill = valueCell.querySelector('.value-fill');
+            const text = valueCell.querySelector('.value-text');
+            
+            if (!valueBar || !fill || !text) return;
+            
+            // Get the current value based on which engine is active
+            const paramConfig = AVAILABLE_PARAMETERS.find(p => p.name === paramName);
+            if (!paramConfig) return;
+            
+            let value = 0;
+            // Check in the right place based on parameter type
+            if (paramConfig.param === 'special') {
+                // Special parameters may not have a direct value representation
+                return;
+            } else if (typeof visualEngine?.params?.[paramConfig.param] !== 'undefined') {
+                value = visualEngine.params[paramConfig.param];
+            } else if (typeof visualEngine?.effectParams?.[paramConfig.param] !== 'undefined') {
+                value = visualEngine.effectParams[paramConfig.param];
+            } else if (typeof webglEngine?.params?.[paramConfig.param] !== 'undefined') {
+                value = webglEngine.params[paramConfig.param];
+            } else if (typeof webglEngine?.effectParams?.[paramConfig.param] !== 'undefined') {
+                value = webglEngine.effectParams[paramConfig.param];
+            } else {
+                return;
+            }
+            
+            // Update the visual display
+            let valuePercent = (value * 100).toFixed(0);
+            if (valuePercent > 100) valuePercent = 100;
+            if (valuePercent < 0) valuePercent = 0;
+            
+            fill.style.width = `${valuePercent}%`;
+            text.textContent = value.toFixed(2);
+        });
+    }
+    
     function updateMappingTable() {
         // Clear existing rows
         mappingTable.innerHTML = '';
