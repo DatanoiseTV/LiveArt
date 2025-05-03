@@ -14,6 +14,28 @@ class WebGLVisuals {
         this.time = 0;
         this.lastTimeUpdated = 0;
         
+        // 3D transformation properties that can be controlled via MIDI
+        this.rotationX = 0;
+        this.rotationY = 0;
+        this.translationZ = 0;
+        
+        // Smoothing variables for transformations
+        this._lastRotationX = 0;
+        this._lastRotationY = 0;
+        this._lastTranslationZ = 0;
+        
+        // Post-processing effects
+        this.effectsEnabled = false;
+        this.activeEffects = [];
+        this.effectParams = {
+            glitchIntensity: 0,
+            bloomStrength: 0,
+            bloomThreshold: 0.5,
+            bloomRadius: 0,
+            rgbShiftAmount: 0,
+            vignetteAmount: 0
+        };
+        
         // Parameters (mirroring the same structure as in VisualEngine)
         this.params = {
             hue: 0.5,            // Base color hue (0-1)
@@ -97,6 +119,9 @@ class WebGLVisuals {
             );
             this.camera.position.z = 5;
             
+            // Initialize post-processing effects
+            this.initPostProcessing();
+            
             // Handle resize
             window.addEventListener('resize', this.onResize.bind(this));
             
@@ -144,14 +169,37 @@ class WebGLVisuals {
         this.objects = {};
         
         // Call the scene creation function
-        this.scenes[sceneName]();
+        try {
+            this.scenes[sceneName]();
+        } catch (e) {
+            console.error(`Error creating scene ${sceneName}:`, e);
+        }
         
         // Update current scene
         this.currentScene = sceneName;
         
+        // Update the render pass in the composer if effects are enabled
+        if (this.composer && this.effectsEnabled) {
+            // Replace the first pass which should be the render pass
+            if (this.composer.passes.length > 0 && this.composer.passes[0] instanceof THREE.RenderPass) {
+                this.composer.passes[0] = new THREE.RenderPass(this.scene, this.camera);
+            } else {
+                // If for some reason we don't have a render pass, reinitialize post-processing
+                this.initPostProcessing();
+            }
+        }
+        
         // Force a render to update the scene with current parameters
-        if (this.isActive) {
-            this.renderer.render(this.scene, this.camera);
+        if (this.isActive && this.renderer) {
+            try {
+                if (this.effectsEnabled && this.composer) {
+                    this.composer.render(0);
+                } else {
+                    this.renderer.render(this.scene, this.camera);
+                }
+            } catch (e) {
+                console.warn("Error rendering new scene:", e);
+            }
         }
         
         console.log(`Loaded WebGL scene: ${sceneName}`);
@@ -267,10 +315,59 @@ class WebGLVisuals {
      * @param {number} value - Parameter value (0-1)
      */
     setParam(paramName, value) {
+        // Handle regular parameters
         if (this.params.hasOwnProperty(paramName)) {
             // Apply reactivity - blend between current and new value
             const reactivity = this.params.reactivity;
             this.params[paramName] = this.params[paramName] * (1 - reactivity) + value * reactivity;
+        }
+        
+        // Handle 3D transformation parameters
+        if (paramName === 'rotationX' || paramName === 'rotationY' || paramName === 'translationZ') {
+            // Apply custom mapped values with min/max ranges
+            let mappedValue;
+            
+            if (paramName === 'rotationX' || paramName === 'rotationY') {
+                // Map from 0-1 to -PI to PI for rotations
+                mappedValue = -Math.PI + value * (Math.PI * 2);
+            } else if (paramName === 'translationZ') {
+                // Map from 0-1 to -10 to 10 for translation
+                mappedValue = -10 + value * 20;
+            }
+            
+            // Apply the mapped value directly to the property
+            this[paramName] = mappedValue;
+            
+            return; // Skip other parameter handling
+        }
+        
+        // Check if this is an effect parameter
+        this.setEffectParam(paramName, value);
+    }
+    
+    /**
+     * Set a post-processing effect parameter
+     * @param {string} paramName - Effect parameter name
+     * @param {number} value - Parameter value (0-1)
+     */
+    setEffectParam(paramName, value) {
+        // Map parameter names to effect parameters
+        switch (paramName) {
+            case 'glitchIntensity':
+            case 'bloomStrength':
+            case 'bloomRadius':
+            case 'bloomThreshold':
+            case 'rgbShiftAmount':
+            case 'vignetteAmount':
+                // Apply reactivity for smoother transitions
+                const reactivity = this.params.reactivity || 0.5;
+                this.effectParams[paramName] = this.effectParams[paramName] * (1 - reactivity) + value * reactivity;
+                break;
+                
+            // Special case for toggling effects on/off
+            case 'effectsEnabled':
+                this.effectsEnabled = value > 0.5;
+                break;
         }
     }
     
@@ -337,26 +434,192 @@ class WebGLVisuals {
     }
     
     /**
+     * Initialize post-processing pipeline
+     */
+    initPostProcessing() {
+        // Only initialize if THREE is available
+        if (typeof THREE === 'undefined' || !this.renderer || !this.isInitialized) return;
+        
+        try {
+            // Try to import and initialize the EffectComposer and effects
+            if (THREE.EffectComposer) {
+                // Create effect composer
+                this.composer = new THREE.EffectComposer(this.renderer);
+                
+                // Add render pass
+                const renderPass = new THREE.RenderPass(this.scene, this.camera);
+                this.composer.addPass(renderPass);
+                
+                // Setup potential effects (but don't enable them yet)
+                this.setupEffects();
+                
+                // Enable effects
+                this.effectsEnabled = true;
+                console.log('WebGL post-processing initialized');
+            } else {
+                console.log('THREE.EffectComposer not available, post-processing disabled');
+                this.effectsEnabled = false;
+            }
+        } catch (e) {
+            console.warn('Could not initialize post-processing:', e);
+            this.effectsEnabled = false;
+        }
+    }
+    
+    /**
+     * Setup potential post-processing effects
+     */
+    setupEffects() {
+        if (!this.composer) return;
+        
+        try {
+            // Glitch effect
+            if (THREE.GlitchPass) {
+                this.glitchPass = new THREE.GlitchPass();
+                this.glitchPass.goWild = false; // Not going completely wild
+                this.glitchPass.enabled = false; // Off by default
+                this.composer.addPass(this.glitchPass);
+            }
+            
+            // RGB Shift effect
+            if (THREE.ShaderPass && THREE.RGBShiftShader) {
+                this.rgbShiftPass = new THREE.ShaderPass(THREE.RGBShiftShader);
+                this.rgbShiftPass.uniforms.amount.value = 0.0;
+                this.rgbShiftPass.enabled = false; // Off by default
+                this.composer.addPass(this.rgbShiftPass);
+            }
+            
+            // Bloom effect
+            if (THREE.UnrealBloomPass) {
+                this.bloomPass = new THREE.UnrealBloomPass(
+                    new THREE.Vector2(window.innerWidth, window.innerHeight),
+                    0.0, // strength
+                    0.5, // radius
+                    0.5  // threshold
+                );
+                this.bloomPass.enabled = false; // Off by default
+                this.composer.addPass(this.bloomPass);
+            }
+            
+            // Vignette effect
+            if (THREE.ShaderPass && THREE.VignetteShader) {
+                this.vignettePass = new THREE.ShaderPass(THREE.VignetteShader);
+                this.vignettePass.uniforms.offset.value = 0.95;
+                this.vignettePass.uniforms.darkness.value = 0.0;
+                this.vignettePass.enabled = false; // Off by default
+                this.composer.addPass(this.vignettePass);
+            }
+            
+            // Make sure the last pass renders to screen
+            const lastPass = this.composer.passes[this.composer.passes.length - 1];
+            if (lastPass) {
+                lastPass.renderToScreen = true;
+            }
+            
+            console.log('Post-processing effects setup complete');
+        } catch (e) {
+            console.warn('Could not setup some effects:', e);
+        }
+    }
+    
+    /**
+     * Update post-processing effects
+     */
+    updateEffects() {
+        if (!this.effectsEnabled || !this.composer) return;
+        
+        // Update Glitch effect
+        if (this.glitchPass) {
+            if (this.effectParams.glitchIntensity > 0) {
+                this.glitchPass.enabled = true;
+                // Set glitch intensity (controls probability of glitching)
+                const glitchProbability = this.effectParams.glitchIntensity * 0.1;
+                if (Math.random() < glitchProbability) {
+                    this.glitchPass.curF = Math.random() * 64;
+                    this.glitchPass.generateTrigger();
+                }
+            } else {
+                this.glitchPass.enabled = false;
+            }
+        }
+        
+        // Update Bloom effect
+        if (this.bloomPass) {
+            if (this.effectParams.bloomStrength > 0) {
+                this.bloomPass.enabled = true;
+                this.bloomPass.strength = this.effectParams.bloomStrength * 2;
+                this.bloomPass.radius = this.effectParams.bloomRadius * 1.5;
+                this.bloomPass.threshold = this.effectParams.bloomThreshold;
+            } else {
+                this.bloomPass.enabled = false;
+            }
+        }
+        
+        // Update RGB Shift effect
+        if (this.rgbShiftPass) {
+            if (this.effectParams.rgbShiftAmount > 0) {
+                this.rgbShiftPass.enabled = true;
+                this.rgbShiftPass.uniforms.amount.value = this.effectParams.rgbShiftAmount * 0.02;
+                this.rgbShiftPass.uniforms.angle.value = this.time * 0.5;
+            } else {
+                this.rgbShiftPass.enabled = false;
+            }
+        }
+        
+        // Update Vignette effect
+        if (this.vignettePass) {
+            if (this.effectParams.vignetteAmount > 0) {
+                this.vignettePass.enabled = true;
+                this.vignettePass.uniforms.offset.value = 0.95 - this.effectParams.vignetteAmount * 0.5;
+                this.vignettePass.uniforms.darkness.value = this.effectParams.vignetteAmount * 1.5;
+            } else {
+                this.vignettePass.enabled = false;
+            }
+        }
+    }
+    
+    /**
      * Animation loop
      */
     animate() {
         if (!this.isActive) return;
         
-        this.frameId = requestAnimationFrame(this.animate.bind(this));
-        
-        // Calculate delta time and update time counter
-        const now = performance.now();
-        const delta = (now - this.lastTimeUpdated) * 0.001; // Convert to seconds
-        this.lastTimeUpdated = now;
-        
-        // Update global time (scaled by speed)
-        this.time += delta * this.mapParam(this.params.speed, 0.2, 2);
-        
-        // Update scene objects
-        this.updateScene(delta);
-        
-        // Render scene
-        this.renderer.render(this.scene, this.camera);
+        try {
+            this.frameId = requestAnimationFrame(this.animate.bind(this));
+            
+            // Calculate delta time and update time counter
+            const now = performance.now();
+            const delta = (now - this.lastTimeUpdated) * 0.001; // Convert to seconds
+            this.lastTimeUpdated = now;
+            
+            // Update global time (scaled by speed)
+            this.time += delta * this.mapParam(this.params.speed, 0.2, 2);
+            
+            // Update scene objects - only if scene exists
+            if (this.scene) {
+                this.updateScene(delta);
+            }
+            
+            // Update post-processing effects
+            this.updateEffects();
+            
+            // Render scene (with or without effects)
+            if (this.effectsEnabled && this.composer && this.scene) {
+                try {
+                    this.composer.render(delta);
+                } catch (e) {
+                    console.warn("Composer render error:", e);
+                    // Fallback to standard renderer
+                    this.renderer.render(this.scene, this.camera);
+                }
+            } else if (this.scene) {
+                this.renderer.render(this.scene, this.camera);
+            }
+        } catch (e) {
+            console.error("Error in animation loop:", e);
+            // Don't let errors stop the animation
+            this.frameId = requestAnimationFrame(this.animate.bind(this));
+        }
     }
     
     /**
@@ -369,8 +632,27 @@ class WebGLVisuals {
         // Common parameters
         const rotationSpeed = this.mapParam(this.params.rotation, -0.5, 0.5) * delta;
         
-        // Update camera zoom
-        this.camera.position.z = this.mapParam(this.params.zoom, 2, 10);
+        // Apply MIDI controllable transformations (rotation) with smooth interpolation
+        // Calculate smoother rotation transitions
+        if (this._lastRotationX === undefined) this._lastRotationX = this.rotationX;
+        if (this._lastRotationY === undefined) this._lastRotationY = this.rotationY;
+        if (this._lastTranslationZ === undefined) this._lastTranslationZ = this.translationZ;
+        
+        // Interpolate rotation X with easing
+        this._lastRotationX += (this.rotationX - this._lastRotationX) * 0.1;
+        this.scene.rotation.x = this._lastRotationX;
+        
+        // Interpolate rotation Y with easing
+        this._lastRotationY += (this.rotationY - this._lastRotationY) * 0.1;
+        this.scene.rotation.y = this._lastRotationY;
+        
+        // Add general scene rotation from rotation param if enabled
+        this.scene.rotation.z += rotationSpeed;
+        
+        // Update camera zoom and Z position with smooth interpolation
+        const baseZoom = this.mapParam(this.params.zoom, 2, 10);
+        this._lastTranslationZ += (this.translationZ - this._lastTranslationZ) * 0.1;
+        this.camera.position.z = baseZoom + this._lastTranslationZ;
         
         // Scene-specific updates
         switch (this.currentScene) {

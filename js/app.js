@@ -55,6 +55,48 @@ document.addEventListener('DOMContentLoaded', () => {
                     });
                 }
                 
+                // Apply 3D WebGL transformation settings if available
+                if (settings.webgl3DSettings) {
+                    if (settings.webgl3DSettings.rotationX !== undefined) {
+                        webglEngine.rotationX = settings.webgl3DSettings.rotationX;
+                        webglEngine._lastRotationX = settings.webgl3DSettings.rotationX;
+                    }
+                    if (settings.webgl3DSettings.rotationY !== undefined) {
+                        webglEngine.rotationY = settings.webgl3DSettings.rotationY;
+                        webglEngine._lastRotationY = settings.webgl3DSettings.rotationY;
+                    }
+                    if (settings.webgl3DSettings.translationZ !== undefined) {
+                        webglEngine.translationZ = settings.webgl3DSettings.translationZ;
+                        webglEngine._lastTranslationZ = settings.webgl3DSettings.translationZ;
+                    }
+                }
+                
+                // Apply 3D effect settings if available
+                if (settings.effects3D && webglEngine.effectParams) {
+                    // Copy all effect parameters
+                    Object.keys(settings.effects3D).forEach(key => {
+                        if (webglEngine.effectParams.hasOwnProperty(key)) {
+                            webglEngine.effectParams[key] = settings.effects3D[key];
+                        }
+                    });
+                }
+                
+                // Apply 2D effect settings if available
+                if (settings.effects2D && visualEngine.effectParams) {
+                    // Copy all effect parameters
+                    Object.keys(settings.effects2D).forEach(key => {
+                        if (visualEngine.effectParams.hasOwnProperty(key)) {
+                            visualEngine.effectParams[key] = settings.effects2D[key];
+                        }
+                    });
+                    
+                    // Enable effects if any were active
+                    const hasActiveEffects = Object.values(settings.effects2D).some(value => value > 0);
+                    if (hasActiveEffects) {
+                        visualEngine.effectsEnabled = true;
+                    }
+                }
+                
                 console.log('Loaded last settings from localStorage');
                 
                 // Check if we need to start in Live Mode
@@ -83,11 +125,38 @@ document.addEventListener('DOMContentLoaded', () => {
             // Get current parameters from the active engine
             const params = isWebGL ? {...webglEngine.params} : {...visualEngine.params};
             
+            // For WebGL, also save the 3D transformation settings and effects
+            let webgl3DSettings = null;
+            let effects2D = null;
+            let effects3D = null;
+            
+            // Save 3D transformation settings if using WebGL
+            if (isWebGL) {
+                webgl3DSettings = {
+                    rotationX: webglEngine.rotationX,
+                    rotationY: webglEngine.rotationY,
+                    translationZ: webglEngine.translationZ
+                };
+                
+                // Save 3D effect parameters if they exist
+                if (webglEngine.effectParams) {
+                    effects3D = {...webglEngine.effectParams};
+                }
+            }
+            
+            // Save 2D effect parameters if they exist
+            if (visualEngine.effectParams) {
+                effects2D = {...visualEngine.effectParams};
+            }
+            
             // Create settings object
             const settings = {
                 visualType: visualType,
                 params: params,
-                isWebGL: isWebGL
+                isWebGL: isWebGL,
+                webgl3DSettings: webgl3DSettings,
+                effects2D: effects2D,
+                effects3D: effects3D
             };
             
             // Save to localStorage
@@ -277,11 +346,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const visualType = presetSelector ? presetSelector.value : 'particles';
         const params = isWebGL ? {...webglEngine.params} : {...visualEngine.params};
         
-        // Create preset object
+        // Create preset object with MIDI mappings
         userPresets[presetName] = {
             visualType: visualType,
             params: params,
-            isWebGL: isWebGL
+            isWebGL: isWebGL,
+            midiMappings: {...MIDI_MAPPINGS} // Include a copy of the current MIDI mappings
         };
         
         // Save to localStorage
@@ -319,6 +389,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 visualEngine.setParam(key, preset.params[key]);
                 webglEngine.setParam(key, preset.params[key]);
             });
+        }
+        
+        // Apply MIDI mappings if they exist in the preset
+        if (preset.midiMappings) {
+            MIDI_MAPPINGS = {...preset.midiMappings};
+            saveMidiMappings(); // Save the updated mappings to localStorage
+            
+            // Update the mapping table if it's visible
+            if (helpPanelElement.classList.contains('active')) {
+                updateMappingTable();
+            }
+            
+            console.log(`Loaded MIDI mappings from preset: ${presetName}`);
         }
         
         console.log(`Loaded preset: ${presetName}`);
@@ -359,7 +442,19 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         else if (isWebGLVisual) {
             // Switching between 3D scenes
+            console.log('Switching 3D scene to:', webglSceneName);
+            
+            // First stop the current WebGL rendering
+            webglEngine.stop();
+            
+            // Load the new scene
             webglEngine.loadScene(webglSceneName);
+            
+            // Restart WebGL engine with new scene
+            webglEngine.start();
+            
+            // Debug message
+            console.log('Switched 3D scene, WebGL running:', webglEngine.isActive);
         }
         else {
             // Switching between 2D visuals
@@ -414,19 +509,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 saturation: 0.85,
                 brightness: 0.95,
                 density: 0.7,
-                speed: 0.2,         // Reduced from 0.4
+                speed: 0.01,        // Ultra slow for complete control
                 size: 0.5,
                 complexity: 0.6,
                 symmetry: 6,
                 reactivity: 0.7,
-                rotation: 0.1       // Added explicit rotation
+                rotation: 0.05      // Very slow rotation
             },
             waves: {
                 hue: 0.3,           // Green
                 saturation: 0.7,
                 brightness: 0.9,
                 density: 0.6,
-                speed: 0.5,
+                speed: 0.05,       // Ultra slow for complete control
                 size: 0.4,
                 complexity: 0.75,
                 noiseScale: 0.03,
@@ -437,10 +532,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 saturation: 0.8,
                 brightness: 0.9,
                 density: 0.5,
-                speed: 0.3,
+                speed: 0.03,       // Ultra slow for complete control
                 size: 0.6,
                 complexity: 0.5,
-                noiseScale: 0.02,
+                noiseScale: 0.01,   // Reduced noise scale
                 reactivity: 0.5
             },
             fractals: {
@@ -448,10 +543,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 saturation: 0.9,
                 brightness: 0.85,
                 density: 0.4,
-                speed: 0.2,
+                speed: 0.2,         // Original speed
                 size: 0.7,
                 complexity: 0.8,
-                rotation: 0.4,
+                rotation: 0.4,      // Original rotation
                 reactivity: 0.6
             },
             audioReactive: {
@@ -459,7 +554,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 saturation: 0.85,
                 brightness: 0.9,
                 density: 0.7,
-                speed: 0.4,
+                speed: 0.4,         // Original speed
                 size: 0.6,
                 complexity: 0.7,
                 reactivity: 0.9
@@ -469,7 +564,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 saturation: 0.75,
                 brightness: 0.85,
                 density: 0.6,
-                speed: 0.35,
+                speed: 0.35,        // Original speed
                 size: 0.4,
                 complexity: 0.65,
                 reactivity: 0.8
@@ -479,10 +574,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 saturation: 0.9,
                 brightness: 0.95,
                 density: 0.5,
-                speed: 0.3,
+                speed: 0.3,         // Original speed
                 size: 0.5,
                 complexity: 0.7,
-                rotation: 0.3,
+                rotation: 0.3,      // Original rotation
                 reactivity: 0.7
             },
             galaxies: {
@@ -490,10 +585,78 @@ document.addEventListener('DOMContentLoaded', () => {
                 saturation: 0.8,
                 brightness: 0.85,
                 density: 0.8,
-                speed: 0.25,
+                speed: 0.25,        // Original speed
                 size: 0.6,
                 complexity: 0.6,
                 reactivity: 0.65
+            },
+            // New visuals
+            kaleidoscope: {
+                hue: 0.85,          // Purple-pink
+                saturation: 0.9,
+                brightness: 0.9,
+                density: 0.6,
+                speed: 0.02,       // Ultra slow for complete control
+                size: 0.7,
+                complexity: 0.8,
+                symmetry: 8,        // High symmetry for kaleidoscope
+                rotation: 0.02,     // Very slow rotation
+                reactivity: 0.8
+            },
+            lissajous: {
+                hue: 0.5,           // Cyan-blue
+                saturation: 0.8,
+                brightness: 0.9,
+                density: 0.7,
+                speed: 0.4,         // Original speed
+                size: 0.5,
+                complexity: 0.7,    // Controls frequency ratio
+                rotation: 0.2,      // Original rotation
+                reactivity: 0.75
+            },
+            voronoi: {
+                hue: 0.1,           // Orange-yellow
+                saturation: 0.7,
+                brightness: 0.9,
+                density: 0.5,       // Cell density
+                speed: 0.01,       // Ultra slow for complete control
+                size: 0.6,          // Cell size
+                complexity: 0.6,
+                noiseScale: 0.01,   // Reduced noise scale
+                reactivity: 0.7
+            },
+            tentacles: {
+                hue: 0.75,          // Purple
+                saturation: 0.8,
+                brightness: 0.85,
+                density: 0.7,       // Number of tentacles
+                speed: 0.3,         // Original speed
+                size: 0.5,          // Tentacle thickness
+                complexity: 0.8,    // Tentacle waviness
+                rotation: 0.1,      // Original rotation
+                reactivity: 0.85    // How reactive to parameter changes
+            },
+            circuitBoard: {
+                hue: 0.35,          // Green
+                saturation: 0.9,
+                brightness: 0.8,
+                density: 0.7,       // Circuit density
+                speed: 0.005,       // Ultra slow for complete control
+                size: 0.5,
+                complexity: 0.75,   // Connection complexity
+                rotation: 0.005,    // Minimal rotation
+                reactivity: 0.6
+            },
+            pixelFlow: {
+                hue: 0.6,           // Blue
+                saturation: 0.8,
+                brightness: 0.95,
+                density: 0.6,       // Particle density
+                speed: 0.03,        // Ultra slow for complete control
+                size: 0.4,          // Particle size
+                complexity: 0.7,    // Flow complexity
+                noiseScale: 0.01,   // Reduced noise scale
+                reactivity: 0.9
             },
             
             // 3D WebGL Visuals
@@ -502,10 +665,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 saturation: 0.8,
                 brightness: 0.9,
                 density: 0.6,
-                speed: 0.4,
+                speed: 0.4,         // Original speed
                 size: 0.5,
                 complexity: 0.7,
-                rotation: 0.2,
+                rotation: 0.2,      // Original rotation
                 zoom: 0.6,
                 reactivity: 0.7
             },
@@ -514,10 +677,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 saturation: 0.9,
                 brightness: 0.95,
                 density: 0.7,
-                speed: 0.5,
+                speed: 0.5,         // Original speed
                 size: 0.6,
                 complexity: 0.8,
-                rotation: 0.3,
+                rotation: 0.3,      // Original rotation
                 zoom: 0.4,
                 reactivity: 0.8
             },
@@ -526,10 +689,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 saturation: 0.9,
                 brightness: 0.9,
                 density: 0.8,
-                speed: 0.35,
+                speed: 0.35,        // Original speed
                 size: 0.4,
                 complexity: 0.65,
-                rotation: 0.1,
+                rotation: 0.1,      // Original rotation
                 zoom: 0.5,
                 reactivity: 0.7
             }
@@ -555,13 +718,45 @@ document.addEventListener('DOMContentLoaded', () => {
         9: { param: 'zoom', name: 'Zoom', min: 0.5, max: 2.0 },
         10: { param: 'noiseScale', name: 'Pattern Scale', min: 0.001, max: 0.05 },
         11: { param: 'noiseSpeed', name: 'Pattern Speed', min: 0.001, max: 0.01 },
-        12: { param: 'symmetry', name: 'Symmetry', min: 1, max: 8, integer: true },
+        12: { param: 'symmetry', name: 'Symmetry', min: 1, max: 16, integer: true },
         13: { param: 'reactivity', name: 'Reactivity' },
         
         // Special controls
         14: { param: 'special', name: 'Randomize', action: 'randomize' },
-        15: { param: 'special', name: 'Next Preset', action: 'nextPreset' }
+        15: { param: 'special', name: 'Next Preset', action: 'nextPreset' },
+        
+        // Visual-specific parameters (using special actions for backward compatibility)
+        16: { param: 'special', name: 'Kaleidoscope Symmetry', action: 'kaleidoscopeSymmetry', min: 3, max: 16, integer: true },
+        17: { param: 'special', name: 'Lissajous Freq Ratio', action: 'lissajousFreqRatio', min: 1, max: 8, integer: true },
+        18: { param: 'special', name: 'Voronoi Cell Size', action: 'voronoiCellSize', min: 0.1, max: 1.0 },
+        19: { param: 'special', name: 'Tentacle Count', action: 'tentacleCount', min: 3, max: 20, integer: true },
+        20: { param: 'special', name: 'Circuit Complexity', action: 'circuitComplexity', min: 0.1, max: 1.0 },
+        21: { param: 'special', name: 'Flow Direction', action: 'flowDirection', min: 0, max: 1.0 },
+        
+        // 3D WebGL specific controls - changed to direct params for proper display
+        22: { param: 'rotationX', name: '3D Rotate X', min: -Math.PI, max: Math.PI },
+        23: { param: 'rotationY', name: '3D Rotate Y', min: -Math.PI, max: Math.PI },
+        24: { param: 'translationZ', name: '3D Translate Z', min: -10, max: 10 },
+        
+        // 3D Post-processing effects
+        25: { param: 'glitchIntensity', name: 'Glitch Effect' },
+        26: { param: 'bloomStrength', name: 'Bloom Effect' },
+        27: { param: 'rgbShiftAmount', name: 'RGB Shift Effect' },
+        28: { param: 'vignetteAmount', name: 'Vignette Effect' },
+        
+        // 2D Post-processing effects
+        29: { param: 'glitchIntensity', name: '2D Glitch' },
+        30: { param: 'chromaticAberration', name: 'RGB Split' },
+        31: { param: 'pixelate', name: 'Pixelate' },
+        32: { param: 'vignette', name: 'Vignette' },
+        33: { param: 'bloom', name: 'Bloom/Glow' },
+        34: { param: 'feedbackAmount', name: 'Feedback/Echo' }
     };
+    
+    // Helper function to check if a specific visual is currently active
+    function isCurrentVisual(visualName) {
+        return visualEngine.currentVisual === visualName;
+    }
     
     // Define all available parameters (used for MIDI learn)
     const AVAILABLE_PARAMETERS = [
@@ -576,10 +771,35 @@ document.addEventListener('DOMContentLoaded', () => {
         { param: 'zoom', name: 'Zoom', min: 0.5, max: 2.0 },
         { param: 'noiseScale', name: 'Pattern Scale', min: 0.001, max: 0.05 },
         { param: 'noiseSpeed', name: 'Pattern Speed', min: 0.001, max: 0.01 },
-        { param: 'symmetry', name: 'Symmetry', min: 1, max: 8, integer: true },
+        { param: 'symmetry', name: 'Symmetry', min: 1, max: 16, integer: true },
         { param: 'reactivity', name: 'Reactivity' },
         { param: 'special', name: 'Randomize', action: 'randomize' },
-        { param: 'special', name: 'Next Preset', action: 'nextPreset' }
+        { param: 'special', name: 'Next Preset', action: 'nextPreset' },
+        { param: 'special', name: 'Kaleidoscope Symmetry', action: 'kaleidoscopeSymmetry', min: 3, max: 16, integer: true },
+        { param: 'special', name: 'Lissajous Freq Ratio', action: 'lissajousFreqRatio', min: 1, max: 8, integer: true },
+        { param: 'special', name: 'Voronoi Cell Size', action: 'voronoiCellSize', min: 0.1, max: 1.0 },
+        { param: 'special', name: 'Tentacle Count', action: 'tentacleCount', min: 3, max: 20, integer: true },
+        { param: 'special', name: 'Circuit Complexity', action: 'circuitComplexity', min: 0.1, max: 1.0 },
+        { param: 'special', name: 'Flow Direction', action: 'flowDirection', min: 0, max: 1.0 },
+        { param: 'rotationX', name: '3D Rotate X', min: -Math.PI, max: Math.PI },
+        { param: 'rotationY', name: '3D Rotate Y', min: -Math.PI, max: Math.PI },
+        { param: 'translationZ', name: '3D Translate Z', min: -10, max: 10 },
+        
+        // WebGL/3D Post-processing effects
+        { param: 'glitchIntensity', name: 'Glitch Effect' },
+        { param: 'bloomStrength', name: 'Bloom Effect' },
+        { param: 'bloomRadius', name: 'Bloom Radius', min: 0, max: 1 },
+        { param: 'bloomThreshold', name: 'Bloom Threshold', min: 0, max: 1 },
+        { param: 'rgbShiftAmount', name: 'RGB Shift Effect' },
+        { param: 'vignetteAmount', name: 'Vignette Effect' },
+        
+        // 2D Post-processing effects
+        { param: 'chromaticAberration', name: 'Chromatic Aberration' },
+        { param: 'pixelate', name: 'Pixelate Effect' },
+        { param: 'vignette', name: 'Vignette Effect' },
+        { param: 'bloom', name: 'Bloom Effect' },
+        { param: 'feedbackAmount', name: 'Feedback/Echo Effect' },
+        { param: 'effectsEnabled', name: 'Toggle Effects' }
     ];
     
     // Try to load saved mappings from localStorage
@@ -606,7 +826,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     // Connect MIDI controller to visuals with improved mapping
-    midiController.onAnyControlChange((ccNumber, value) => {
+    if (typeof midiController !== 'undefined') {
+        midiController.onAnyControlChange((ccNumber, value) => {
         // Reset controls timeout on MIDI activity
         resetControlsTimeout();
         
@@ -635,6 +856,94 @@ document.addEventListener('DOMContentLoaded', () => {
                         setTimeout(saveCurrentSettings, 500);
                     }
                     return;
+                    
+                // Legacy special controls - handle visualization-specific params
+                case 'kaleidoscopeSymmetry':
+                    // Map to symmetry parameter when in kaleidoscope mode
+                    if (isCurrentVisual('kaleidoscope')) {
+                        const mappedValue = mapping.min + value * (mapping.max - mapping.min);
+                        const intValue = Math.round(mappedValue);
+                        visualEngine.setParam('symmetry', intValue);
+                    }
+                    return;
+                    
+                case 'lissajousFreqRatio':
+                    // Map to complexity parameter when in lissajous mode
+                    if (isCurrentVisual('lissajous')) {
+                        const mappedValue = mapping.min + value * (mapping.max - mapping.min);
+                        const intValue = Math.round(mappedValue);
+                        visualEngine.setParam('complexity', intValue/8); // Scale to 0-1 range
+                    }
+                    return;
+                    
+                case 'voronoiCellSize':
+                    // Map to size parameter when in voronoi mode
+                    if (isCurrentVisual('voronoi')) {
+                        const mappedValue = mapping.min + value * (mapping.max - mapping.min);
+                        visualEngine.setParam('size', mappedValue);
+                    }
+                    return;
+                    
+                case 'tentacleCount':
+                    // Map to density parameter when in tentacles mode
+                    if (isCurrentVisual('tentacles')) {
+                        const mappedValue = mapping.min + value * (mapping.max - mapping.min);
+                        const intValue = Math.round(mappedValue);
+                        visualEngine.setParam('density', intValue/20); // Scale to 0-1 range
+                    }
+                    return;
+                    
+                case 'circuitComplexity':
+                    // Map to complexity parameter when in circuit board mode
+                    if (isCurrentVisual('circuitBoard')) {
+                        const mappedValue = mapping.min + value * (mapping.max - mapping.min);
+                        visualEngine.setParam('complexity', mappedValue);
+                    }
+                    return;
+                    
+                case 'flowDirection':
+                    // Map to rotation parameter when in pixelFlow mode
+                    if (isCurrentVisual('pixelFlow')) {
+                        visualEngine.setParam('rotation', value);
+                    }
+                    return;
+                    
+                // Note: 3D WebGL Controls (rotationX, rotationY, translationZ) are now handled
+                // as regular parameters below, not as special actions
+            }
+        }
+        
+        // Handle visualization-specific parameters (new style)
+        if (mapping.visualType) {
+            // Only apply if the current visualization matches
+            if (isCurrentVisual(mapping.visualType)) {
+                let mappedValue = value;
+                
+                // Map to custom range if specified
+                if (mapping.min !== undefined && mapping.max !== undefined) {
+                    mappedValue = mapping.min + value * (mapping.max - mapping.min);
+                    
+                    // Convert to integer if specified
+                    if (mapping.integer) {
+                        mappedValue = Math.round(mappedValue);
+                    }
+                }
+                
+                // Apply the parameter to the active engine
+                visualEngine.setParam(mapping.param, mappedValue);
+                
+                // Throttled save to avoid too many localStorage writes
+                if (!window.visualTypeSaveTimeout) {
+                    window.visualTypeSaveTimeout = setTimeout(() => {
+                        saveCurrentSettings();
+                        window.visualTypeSaveTimeout = null;
+                    }, 1000);
+                }
+                
+                return;
+            } else {
+                // Skip if this parameter is for a different visualization
+                return;
             }
         }
         
@@ -669,7 +978,8 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     
     // Connect MIDI program changes to switch visual algorithms
-    midiController.onProgramChange((programNumber) => {
+    if (typeof midiController !== 'undefined') {
+        midiController.onProgramChange((programNumber) => {
         // Reset controls timeout on MIDI activity
         resetControlsTimeout();
         
@@ -699,6 +1009,7 @@ document.addEventListener('DOMContentLoaded', () => {
             console.log(`Ignoring unknown program change: ${programNumber}`);
         }
     });
+    }
     
     // Function to cycle to next preset
     function nextPreset() {
@@ -766,6 +1077,11 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Keyboard controls with enhanced functionality
     window.addEventListener('keydown', (e) => {
+        // Skip keyboard shortcuts if the event occurred in a text input, textarea, or select element
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') {
+            return;
+        }
+            
         // Reset UI timeout on key activity (unless in live mode)
         if (!isLiveMode) {
             resetControlsTimeout();
@@ -780,6 +1096,41 @@ document.addEventListener('DOMContentLoaded', () => {
                 }, 1000);
             }
         };
+        
+        // 3D Controls with X,Y,Z keys + Shift/Alt
+        if (isWebGL && (e.key === 'x' || e.key === 'y' || e.key === 'z')) {
+            const smallDelta = 0.1; // Small movement for fine control
+            const largeDelta = 0.5;  // Larger movement for quick adjustments
+            const delta = e.shiftKey ? largeDelta : smallDelta;
+            
+            if (e.key === 'x') {
+                // X key controls rotation X
+                webglEngine.rotationX += e.altKey ? -delta : delta;
+                console.log(`3D Rotate X: ${webglEngine.rotationX.toFixed(2)}`);
+            } else if (e.key === 'y') {
+                // Y key controls rotation Y
+                webglEngine.rotationY += e.altKey ? -delta : delta;
+                console.log(`3D Rotate Y: ${webglEngine.rotationY.toFixed(2)}`);
+            } else if (e.key === 'z') {
+                // Z key controls translation Z
+                webglEngine.translationZ += e.altKey ? -delta : delta;
+                console.log(`3D Translate Z: ${webglEngine.translationZ.toFixed(2)}`);
+            }
+            
+            // Save settings after 3D adjustments
+            throttledSave();
+            return;
+        }
+        
+        // Reset 3D transformations with R key
+        if (isWebGL && e.key.toLowerCase() === 'r') {
+            webglEngine.rotationX = 0;
+            webglEngine.rotationY = 0;
+            webglEngine.translationZ = 0;
+            console.log('Reset 3D transformations');
+            throttledSave();
+            return;
+        }
         
         // Number keys 1-9 simulate MIDI CC messages 1-9
         if (e.key >= '1' && e.key <= '9') {
@@ -974,12 +1325,42 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('resize', optimizeForPerformance);
     
     // Setup Help Panel and MIDI CC learning
-    const helpPanel = document.getElementById('help-panel');
+    // Using the already declared helpPanelElement from above
     const helpButton = document.getElementById('help-button');
     const closeHelpButton = document.getElementById('close-help');
     const mappingTable = document.getElementById('midi-mapping-table').querySelector('tbody');
     const learnStatus = document.getElementById('learn-status');
     const cancelLearnButton = document.getElementById('cancel-learn');
+    
+    // Add elements for exporting/importing mappings
+    const exportButton = document.createElement('button');
+    exportButton.id = 'export-midi-map';
+    exportButton.className = 'secondary-button';
+    exportButton.textContent = 'Export CC Map';
+    
+    const importButton = document.createElement('button');
+    importButton.id = 'import-midi-map';
+    importButton.className = 'secondary-button';
+    importButton.textContent = 'Import CC Map';
+    
+    // File input element for importing (hidden)
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.id = 'cc-map-file';
+    fileInput.style.display = 'none';
+    fileInput.accept = '.json';
+    
+    // Add these elements to the help panel
+    const helpActions = document.createElement('div');
+    helpActions.className = 'help-actions';
+    helpActions.appendChild(exportButton);
+    helpActions.appendChild(importButton);
+    helpActions.appendChild(fileInput);
+    
+    // Insert after learn status
+    if (learnStatus.parentNode) {
+        learnStatus.parentNode.insertBefore(helpActions, learnStatus.nextSibling);
+    }
     
     // State for MIDI learning
     let isLearning = false;
@@ -988,9 +1369,100 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Toggle help panel visibility
     function toggleHelpPanel() {
-        helpPanel.classList.toggle('active');
-        if (helpPanel.classList.contains('active')) {
+        helpPanelElement.classList.toggle('active');
+        if (helpPanelElement.classList.contains('active')) {
             updateMappingTable();
+            
+            // Create or update the CC Map Presets section
+            let ccMapSection = document.getElementById('cc-map-presets-section');
+            if (!ccMapSection) {
+                // Create the section if it doesn't exist
+                ccMapSection = document.createElement('div');
+                ccMapSection.id = 'cc-map-presets-section';
+                ccMapSection.className = 'cc-map-presets-section';
+                ccMapSection.style.borderTop = '1px solid rgba(255, 255, 255, 0.1)';
+                ccMapSection.style.paddingTop = '15px';
+                ccMapSection.style.marginTop = '20px';
+                ccMapSection.style.marginBottom = '20px';
+                
+                // Create title
+                const title = document.createElement('h3');
+                title.textContent = 'MIDI CC Map Presets';
+                title.style.fontSize = '1rem';
+                title.style.marginBottom = '10px';
+                title.style.color = '#ccc';
+                ccMapSection.appendChild(title);
+                
+                // Create description
+                const description = document.createElement('p');
+                description.textContent = 'Save the current MIDI CC mappings as a named preset or load existing presets.';
+                description.style.fontSize = '0.9em';
+                description.style.marginBottom = '10px';
+                description.style.color = '#aaa';
+                ccMapSection.appendChild(description);
+                
+                // Create controls container
+                const controls = document.createElement('div');
+                controls.className = 'cc-map-preset-controls';
+                controls.style.display = 'flex';
+                controls.style.alignItems = 'center';
+                controls.style.gap = '10px';
+                controls.style.marginBottom = '15px';
+                controls.style.flexWrap = 'wrap';
+                
+                // Add name input
+                const nameInput = document.createElement('input');
+                nameInput.type = 'text';
+                nameInput.id = 'cc-map-preset-name';
+                nameInput.placeholder = 'Preset Name';
+                nameInput.style.padding = '5px 10px';
+                nameInput.style.borderRadius = '4px';
+                nameInput.style.border = '1px solid rgba(255, 255, 255, 0.2)';
+                nameInput.style.backgroundColor = '#333';
+                nameInput.style.color = '#fff';
+                controls.appendChild(nameInput);
+                
+                // Add save button
+                const saveButton = document.createElement('button');
+                saveButton.textContent = 'Save CC Map';
+                saveButton.className = 'secondary-button';
+                saveButton.style.backgroundColor = '#4CAF50';
+                saveButton.id = 'save-cc-map-preset';
+                controls.appendChild(saveButton);
+                
+                // Add select for existing presets
+                const presetSelect = document.createElement('select');
+                presetSelect.id = 'cc-map-preset-select';
+                presetSelect.style.minWidth = '150px';
+                controls.appendChild(presetSelect);
+                
+                // Add load button
+                const loadButton = document.createElement('button');
+                loadButton.textContent = 'Load';
+                loadButton.className = 'secondary-button';
+                loadButton.id = 'load-cc-map-preset';
+                controls.appendChild(loadButton);
+                
+                // Add delete button
+                const deleteButton = document.createElement('button');
+                deleteButton.textContent = 'Delete';
+                deleteButton.className = 'secondary-button';
+                deleteButton.style.backgroundColor = '#F44336';
+                deleteButton.id = 'delete-cc-map-preset';
+                controls.appendChild(deleteButton);
+                
+                ccMapSection.appendChild(controls);
+                
+                // Add to panel
+                const helpPanelContent = document.querySelector('.help-panel-content');
+                const keyboardShortcuts = document.querySelector('.keyboard-shortcuts');
+                if (helpPanelContent && keyboardShortcuts) {
+                    helpPanelContent.insertBefore(ccMapSection, keyboardShortcuts);
+                }
+            }
+            
+            // Update the CC Map presets dropdown
+            updateCCMapPresetsDropdown();
         }
     }
     
@@ -1000,6 +1472,11 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Also open help panel with M key
     window.addEventListener('keydown', (e) => {
+        // Skip keyboard shortcuts if the event occurred in a text input, textarea, or select element
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') {
+            return;
+        }
+        
         if (e.key.toLowerCase() === 'm') {
             toggleHelpPanel();
         }
@@ -1012,11 +1489,24 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // Add rows for each parameter
         AVAILABLE_PARAMETERS.forEach(paramConfig => {
-            // Look for mappings where param matches
-            const mappingEntries = Object.entries(MIDI_MAPPINGS).filter(
-                ([_, config]) => config.param === paramConfig.param && 
-                (config.action === undefined || config.action === paramConfig.action)
-            );
+            // For visualization-specific parameters, only show if the current visualization matches
+            if (paramConfig.visualType && !isCurrentVisual(paramConfig.visualType)) {
+                return; // Skip this parameter if it's for a different visualization
+            }
+            
+            // Look for mappings where param and type matches
+            const mappingEntries = Object.entries(MIDI_MAPPINGS).filter(([_, config]) => {
+                // Check basic param match
+                if (config.param !== paramConfig.param) return false;
+                
+                // For special actions, make sure they match
+                if (config.param === 'special' && config.action !== paramConfig.action) return false;
+                
+                // For visualization-specific params, check the visualType too
+                if (paramConfig.visualType && config.visualType !== paramConfig.visualType) return false;
+                
+                return true;
+            });
             
             let ccNumber = '';
             if (mappingEntries.length > 0) {
@@ -1026,9 +1516,27 @@ document.addEventListener('DOMContentLoaded', () => {
             // Get current value (if applicable)
             let currentValue = '';
             let valuePercent = 0;
+            
+            // Check standard parameters
             if (paramConfig.param !== 'special' && visualEngine.params[paramConfig.param] !== undefined) {
                 currentValue = visualEngine.params[paramConfig.param].toFixed(2);
                 valuePercent = (visualEngine.params[paramConfig.param] * 100).toFixed(0);
+                if (valuePercent > 100) valuePercent = 100;
+                if (valuePercent < 0) valuePercent = 0;
+            }
+            // Check effect parameters in visualEngine
+            else if (paramConfig.param !== 'special' && visualEngine.effectParams && 
+                     visualEngine.effectParams[paramConfig.param] !== undefined) {
+                currentValue = visualEngine.effectParams[paramConfig.param].toFixed(2);
+                valuePercent = (visualEngine.effectParams[paramConfig.param] * 100).toFixed(0);
+                if (valuePercent > 100) valuePercent = 100;
+                if (valuePercent < 0) valuePercent = 0;
+            }
+            // Check effect parameters in webglEngine (for 3D effects)
+            else if (paramConfig.param !== 'special' && webglEngine.effectParams && 
+                     webglEngine.effectParams[paramConfig.param] !== undefined) {
+                currentValue = webglEngine.effectParams[paramConfig.param].toFixed(2);
+                valuePercent = (webglEngine.effectParams[paramConfig.param] * 100).toFixed(0);
                 if (valuePercent > 100) valuePercent = 100;
                 if (valuePercent < 0) valuePercent = 0;
             }
@@ -1048,12 +1556,33 @@ document.addEventListener('DOMContentLoaded', () => {
             
             // Value with progress bar
             const valueCell = document.createElement('td');
-            if (paramConfig.param !== 'special') {
+            
+            // Special handling for 3D controls and visualization-specific parameters
+            if (paramConfig.param === 'special' && paramConfig.action && paramConfig.action.startsWith('rotate3D')) {
+                valueCell.textContent = 'Rotation Control';
+            } else if (paramConfig.param === 'special' && paramConfig.action && paramConfig.action === 'translate3DZ') {
+                valueCell.textContent = 'Position Control';
+            } else if (paramConfig.param === 'special' && paramConfig.action && 
+                      ['kaleidoscopeSymmetry', 'lissajousFreqRatio', 'voronoiCellSize', 
+                       'tentacleCount', 'circuitComplexity', 'flowDirection'].includes(paramConfig.action)) {
+                valueCell.textContent = 'Visual Parameter';
+            } else if (paramConfig.param !== 'special') {
                 const valueBar = document.createElement('div');
                 valueBar.className = 'parameter-value';
                 
+                // Add data attribute to store parameter info for dragging
+                valueBar.dataset.param = paramConfig.param;
+                if (paramConfig.action) valueBar.dataset.action = paramConfig.action;
+                if (paramConfig.min !== undefined) valueBar.dataset.min = paramConfig.min;
+                if (paramConfig.max !== undefined) valueBar.dataset.max = paramConfig.max;
+                if (paramConfig.integer !== undefined) valueBar.dataset.integer = paramConfig.integer;
+                
                 const bar = document.createElement('div');
                 bar.className = 'value-bar';
+                
+                // Make bar draggable
+                bar.style.cursor = 'pointer';
+                
                 const fill = document.createElement('div');
                 fill.className = 'value-fill';
                 fill.style.width = `${valuePercent}%`;
@@ -1066,6 +1595,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 valueBar.appendChild(bar);
                 valueBar.appendChild(valueText);
                 valueCell.appendChild(valueBar);
+                
+                // Add event listeners for mouse interaction
+                addDragHandlers(bar, valueBar, paramConfig);
             } else {
                 valueCell.textContent = 'Action';
             }
@@ -1197,9 +1729,220 @@ document.addEventListener('DOMContentLoaded', () => {
     // Setup the cancel button
     cancelLearnButton.addEventListener('click', cancelLearnMode);
     
+    // Object to store CC Map presets
+    let ccMapPresets = {};
+    
+    // Helper function to load CC Map presets from localStorage
+    function loadCCMapPresets() {
+        try {
+            const storedPresets = localStorage.getItem('liveArtCCMapPresets');
+            if (storedPresets) {
+                ccMapPresets = JSON.parse(storedPresets);
+                updateCCMapPresetsDropdown();
+                console.log('Loaded CC Map presets from localStorage');
+            }
+        } catch (e) {
+            console.warn('Failed to load CC Map presets:', e);
+            ccMapPresets = {};
+        }
+    }
+    
+    // Helper function to save CC Map presets to localStorage
+    function saveCCMapPresets() {
+        try {
+            localStorage.setItem('liveArtCCMapPresets', JSON.stringify(ccMapPresets));
+            console.log('Saved CC Map presets to localStorage');
+        } catch (e) {
+            console.warn('Failed to save CC Map presets:', e);
+        }
+    }
+    
+    // Update the CC Map presets dropdown
+    function updateCCMapPresetsDropdown() {
+        const presetSelect = document.getElementById('cc-map-preset-select');
+        if (!presetSelect) return;
+        
+        // Clear existing options
+        presetSelect.innerHTML = '<option value="">-- Select Preset --</option>';
+        
+        // Add preset options
+        Object.keys(ccMapPresets).forEach(presetName => {
+            const option = document.createElement('option');
+            option.value = presetName;
+            option.textContent = presetName;
+            presetSelect.appendChild(option);
+        });
+    }
+    
+    // Load CC Map presets on startup
+    loadCCMapPresets();
+    
+    // Setup event listeners for CC Map preset management
+    document.addEventListener('click', function(e) {
+        // Save CC Map preset
+        if (e.target && e.target.id === 'save-cc-map-preset') {
+            const nameInput = document.getElementById('cc-map-preset-name');
+            if (!nameInput || !nameInput.value.trim()) {
+                alert('Please enter a name for the CC Map preset');
+                return;
+            }
+            
+            const presetName = nameInput.value.trim();
+            
+            // Save the current mappings as a preset
+            ccMapPresets[presetName] = {...MIDI_MAPPINGS};
+            saveCCMapPresets();
+            
+            // Update the dropdown
+            updateCCMapPresetsDropdown();
+            
+            // Reset the input
+            nameInput.value = '';
+            
+            console.log(`Saved CC Map preset: ${presetName}`);
+        }
+        
+        // Load CC Map preset
+        if (e.target && e.target.id === 'load-cc-map-preset') {
+            const presetSelect = document.getElementById('cc-map-preset-select');
+            if (!presetSelect || !presetSelect.value) {
+                alert('Please select a CC Map preset to load');
+                return;
+            }
+            
+            const presetName = presetSelect.value;
+            if (!ccMapPresets[presetName]) return;
+            
+            // Apply the selected preset
+            MIDI_MAPPINGS = {...ccMapPresets[presetName]};
+            saveMidiMappings();
+            
+            // Update the mapping table
+            updateMappingTable();
+            
+            console.log(`Loaded CC Map preset: ${presetName}`);
+        }
+        
+        // Delete CC Map preset
+        if (e.target && e.target.id === 'delete-cc-map-preset') {
+            const presetSelect = document.getElementById('cc-map-preset-select');
+            if (!presetSelect || !presetSelect.value) {
+                alert('Please select a CC Map preset to delete');
+                return;
+            }
+            
+            const presetName = presetSelect.value;
+            
+            if (confirm(`Are you sure you want to delete the "${presetName}" CC Map preset?`)) {
+                // Remove the preset
+                delete ccMapPresets[presetName];
+                saveCCMapPresets();
+                
+                // Update the dropdown
+                updateCCMapPresetsDropdown();
+                
+                console.log(`Deleted CC Map preset: ${presetName}`);
+            }
+        }
+    });
+    }
+    
+    // Export MIDI mappings to a file
+    // Only add the event listener if the button exists and is in the DOM
+    document.addEventListener('DOMContentLoaded', () => {
+        const exportButtonEl = document.getElementById('export-midi-map');
+        if (exportButtonEl) {
+            exportButtonEl.addEventListener('click', () => {
+        try {
+            // Create a JSON blob with the MIDI mappings
+            const mappingsJson = JSON.stringify(MIDI_MAPPINGS, null, 2);
+            const blob = new Blob([mappingsJson], { type: 'application/json' });
+            
+            // Create a download link
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'liveart-midi-mappings.json';
+            
+            // Trigger the download
+            document.body.appendChild(a);
+            a.click();
+            
+            // Clean up
+            setTimeout(() => {
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }, 100);
+            
+            console.log('Exported MIDI mappings to file');
+        } catch (e) {
+            console.error('Failed to export MIDI mappings:', e);
+            alert('Error exporting MIDI mappings: ' + e.message);
+        }
+            });
+        }
+    });
+    
+    // Import MIDI mappings from a file
+    document.addEventListener('DOMContentLoaded', () => {
+        const importButtonEl = document.getElementById('import-midi-map');
+        if (importButtonEl) {
+            importButtonEl.addEventListener('click', () => {
+                // Trigger the file input
+                const fileInputEl = document.getElementById('cc-map-file');
+                if (fileInputEl) {
+                    fileInputEl.click();
+                }
+            });
+        }
+        
+        // Handle file selection
+        const fileInputEl = document.getElementById('cc-map-file');
+        if (fileInputEl) {
+            fileInputEl.addEventListener('change', (e) => {
+        if (!e.target.files || !e.target.files[0]) return;
+        
+        const file = e.target.files[0];
+        const reader = new FileReader();
+        
+        reader.onload = (event) => {
+            try {
+                // Parse the file contents
+                const mappings = JSON.parse(event.target.result);
+                
+                // Validate the mappings (basic check)
+                if (typeof mappings !== 'object' || mappings === null) {
+                    throw new Error('Invalid MIDI mappings format');
+                }
+                
+                // Ask for confirmation
+                if (confirm('This will replace your current MIDI mappings. Continue?')) {
+                    // Apply the mappings
+                    MIDI_MAPPINGS = mappings;
+                    saveMidiMappings();
+                    
+                    // Update the mapping table
+                    updateMappingTable();
+                    
+                    console.log('Imported MIDI mappings from file');
+                }
+            } catch (e) {
+                console.error('Failed to import MIDI mappings:', e);
+                alert('Error importing MIDI mappings: ' + e.message);
+            }
+            
+            // Reset the file input so the same file can be selected again
+            fileInputEl.value = '';
+        };
+        
+        reader.readAsText(file);
+        });
+        }
+    });
+    
     // Update mapping table with live values
     function updateMappingValues() {
-        if (!helpPanel.classList.contains('active')) return;
+        if (!helpPanelElement.classList.contains('active')) return;
         
         // Find value bars and update them
         const rows = mappingTable.querySelectorAll('tr');
@@ -1207,21 +1950,241 @@ document.addEventListener('DOMContentLoaded', () => {
             const paramName = row.querySelector('td').textContent;
             const param = AVAILABLE_PARAMETERS.find(p => p.name === paramName)?.param;
             
-            if (param && param !== 'special' && visualEngine.params[param] !== undefined) {
-                const valueCell = row.querySelector('.parameter-value');
-                if (valueCell) {
-                    const fill = valueCell.querySelector('.value-fill');
-                    const text = valueCell.querySelector('.value-text');
-                    
-                    const value = visualEngine.params[param];
-                    let valuePercent = (value * 100).toFixed(0);
-                    if (valuePercent > 100) valuePercent = 100;
-                    if (valuePercent < 0) valuePercent = 0;
-                    
-                    fill.style.width = `${valuePercent}%`;
-                    text.textContent = value.toFixed(2);
+            if (!param || param === 'special') return;
+            
+            const valueCell = row.querySelector('.parameter-value');
+            if (!valueCell) return;
+            
+            const fill = valueCell.querySelector('.value-fill');
+            const text = valueCell.querySelector('.value-text');
+            if (!fill || !text) return;
+            
+            let value;
+            let found = false;
+            
+            // Check standard parameters
+            if (visualEngine.params[param] !== undefined) {
+                value = visualEngine.params[param];
+                found = true;
+            }
+            // Check visualEngine effect parameters
+            else if (visualEngine.effectParams && visualEngine.effectParams[param] !== undefined) {
+                value = visualEngine.effectParams[param];
+                found = true;
+            }
+            // Check webglEngine effect parameters
+            else if (webglEngine.effectParams && webglEngine.effectParams[param] !== undefined) {
+                value = webglEngine.effectParams[param];
+                found = true;
+            }
+            // Check 3D transform parameters directly on webglEngine
+            else if (['rotationX', 'rotationY', 'translationZ'].includes(param) && 
+                     webglEngine[param] !== undefined) {
+                value = webglEngine[param];
+                found = true;
+            }
+            
+            if (found) {
+                let valuePercent = (value * 100).toFixed(0);
+                if (valuePercent > 100) valuePercent = 100;
+                if (valuePercent < 0) valuePercent = 0;
+                
+                fill.style.width = `${valuePercent}%`;
+                text.textContent = value.toFixed(2);
+            }
+        });
+    }
+    
+    /**
+     * Add drag handlers to parameter bars
+     * @param {HTMLElement} barElement - The value bar element
+     * @param {HTMLElement} valueBarContainer - The container with parameter data
+     * @param {Object} paramConfig - Parameter configuration
+     */
+    function addDragHandlers(barElement, valueBarContainer, paramConfig) {
+        let isDragging = false;
+        
+        // Update the parameter value based on click/drag position
+        function updateValueFromEvent(e) {
+            // Calculate position within the bar (0-1)
+            const rect = barElement.getBoundingClientRect();
+            let percent = (e.clientX - rect.left) / rect.width;
+            
+            // Clamp to 0-1 range
+            percent = Math.max(0, Math.min(1, percent));
+            
+            // Apply parameter mapping based on min/max if available
+            let mappedValue = percent;
+            if (valueBarContainer.dataset.min !== undefined && valueBarContainer.dataset.max !== undefined) {
+                const min = parseFloat(valueBarContainer.dataset.min);
+                const max = parseFloat(valueBarContainer.dataset.max);
+                mappedValue = min + percent * (max - min);
+            }
+            
+            // Convert to integer if specified
+            if (valueBarContainer.dataset.integer === "true") {
+                mappedValue = Math.round(mappedValue);
+            }
+            
+            // Get parameter name and type
+            const param = valueBarContainer.dataset.param;
+            const isSpecial = param === 'special';
+            const action = valueBarContainer.dataset.action;
+            
+            // Apply the value to the appropriate engine
+            if (isSpecial) {
+                // Handle special parameter actions
+                // This would handle things like visualization-specific parameters
+                switch (action) {
+                    case 'kaleidoscopeSymmetry':
+                        if (isCurrentVisual('kaleidoscope')) {
+                            visualEngine.setParam('symmetry', Math.round(mappedValue));
+                        }
+                        break;
+                    case 'lissajousFreqRatio':
+                        if (isCurrentVisual('lissajous')) {
+                            visualEngine.setParam('complexity', mappedValue/8);
+                        }
+                        break;
+                    case 'voronoiCellSize':
+                        if (isCurrentVisual('voronoi')) {
+                            visualEngine.setParam('size', mappedValue);
+                        }
+                        break;
+                    case 'tentacleCount':
+                        if (isCurrentVisual('tentacles')) {
+                            visualEngine.setParam('density', mappedValue/20);
+                        }
+                        break;
+                    case 'circuitComplexity':
+                        if (isCurrentVisual('circuitBoard')) {
+                            visualEngine.setParam('complexity', mappedValue);
+                        }
+                        break;
+                    case 'flowDirection':
+                        if (isCurrentVisual('pixelFlow')) {
+                            visualEngine.setParam('rotation', percent); // Use original percentage
+                        }
+                        break;
+                }
+            } else {
+                // Handle regular parameters
+                if (isWebGL) {
+                    webglEngine.setParam(param, mappedValue);
+                } else {
+                    visualEngine.setParam(param, mappedValue);
                 }
             }
+            
+            // Update the visual appearance of the bar
+            const fill = barElement.querySelector('.value-fill');
+            const text = valueBarContainer.querySelector('.value-text');
+            
+            if (fill && text) {
+                fill.style.width = `${percent * 100}%`;
+                text.textContent = mappedValue.toFixed(2);
+            }
+            
+            // Save settings (throttled)
+            if (!window.paramDragSaveTimeout) {
+                window.paramDragSaveTimeout = setTimeout(() => {
+                    saveCurrentSettings();
+                    window.paramDragSaveTimeout = null;
+                }, 500);
+            }
+        }
+        
+        // Mouse down event - start dragging
+        barElement.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            document.body.style.userSelect = 'none'; // Prevent text selection during drag
+            updateValueFromEvent(e);
+            e.preventDefault();
+            
+            // Create unique ID for this drag instance
+            const dragId = Math.random().toString(36).substring(2, 9);
+            barElement._dragId = dragId;
+            
+            // Define handlers for this specific drag session
+            const mouseMoveHandler = (e) => {
+                if (isDragging && barElement._dragId === dragId) {
+                    updateValueFromEvent(e);
+                    e.preventDefault();
+                }
+            };
+            
+            const mouseUpHandler = () => {
+                if (isDragging && barElement._dragId === dragId) {
+                    isDragging = false;
+                    document.body.style.userSelect = ''; // Restore text selection
+                    
+                    // Force a save when dragging is complete
+                    saveCurrentSettings();
+                    
+                    // Clean up event listeners
+                    document.removeEventListener('mousemove', mouseMoveHandler);
+                    document.removeEventListener('mouseup', mouseUpHandler);
+                }
+            };
+            
+            // Add temporary event listeners
+            document.addEventListener('mousemove', mouseMoveHandler);
+            document.addEventListener('mouseup', mouseUpHandler);
+        });
+        
+        // Click event for immediate updates (without drag)
+        barElement.addEventListener('click', (e) => {
+            updateValueFromEvent(e);
+            e.stopPropagation();
+        });
+        
+        // Touch events for mobile support
+        barElement.addEventListener('touchstart', (e) => {
+            isDragging = true;
+            document.body.style.userSelect = 'none';
+            const touch = e.touches[0];
+            
+            // Create a synthetic mouse event with clientX/clientY properties
+            updateValueFromEvent({
+                clientX: touch.clientX,
+                clientY: touch.clientY
+            });
+            e.preventDefault();
+            
+            // Create unique ID for this touch drag instance
+            const touchDragId = Math.random().toString(36).substring(2, 9);
+            barElement._touchDragId = touchDragId;
+            
+            // Define handlers for this specific touch session
+            const touchMoveHandler = (e) => {
+                if (isDragging && barElement._touchDragId === touchDragId) {
+                    const touch = e.touches[0];
+                    // Create a synthetic mouse event
+                    updateValueFromEvent({
+                        clientX: touch.clientX,
+                        clientY: touch.clientY
+                    });
+                    e.preventDefault();
+                }
+            };
+            
+            const touchEndHandler = () => {
+                if (isDragging && barElement._touchDragId === touchDragId) {
+                    isDragging = false;
+                    document.body.style.userSelect = '';
+                    saveCurrentSettings();
+                    
+                    // Clean up event listeners when done
+                    document.removeEventListener('touchmove', touchMoveHandler);
+                    document.removeEventListener('touchend', touchEndHandler);
+                    document.removeEventListener('touchcancel', touchEndHandler);
+                }
+            };
+            
+            // Add temporary touch event listeners
+            document.addEventListener('touchmove', touchMoveHandler);
+            document.addEventListener('touchend', touchEndHandler);
+            document.addEventListener('touchcancel', touchEndHandler);
         });
     }
     
@@ -1243,12 +2206,18 @@ document.addEventListener('DOMContentLoaded', () => {
         'H: Hide/show controls\n' +
         'M: Show MIDI mappings\n' +
         'L: Toggle LIVE MODE (hide all UI for projection)\n' +
+        'X/Y/Z: 3D rotation/translation (with Shift for larger steps)\n' +
+        'R: Reset 3D transformations\n' +
         '\nPresets & Settings:\n' +
         '- Settings are automatically saved and restored\n' +
         '- Use Save/Load buttons to create named presets\n' +
+        '- In the MIDI mapping panel, you can drag the sliders to change values\n' +
+        '- MIDI CC Maps can be saved as presets in the mapping panel\n' +
+        '- Export/Import CC Maps to files for sharing or backup\n' +
         '\nMouse/Touch:\n' +
         'Double-click: Toggle fullscreen\n' +
         'Touch: X = hue, Y = brightness\n' +
-        'Pinch: Zoom and rotation\n'
+        'Pinch: Zoom and rotation\n' +
+        'Drag parameter sliders: Directly adjust values without MIDI\n'
     );
 });

@@ -11,18 +11,7 @@
         <canvas id="visualizer"></canvas>
         
         <div class="controls">
-            <div class="midi-status">
-                <div id="midi-indicator" class="indicator"></div>
-                <span>MIDI</span>
-            </div>
-            <div class="midi-port-selector">
-                <label for="midi-input">MIDI Input:</label>
-                <select id="midi-input">
-                    <option value="">No MIDI inputs available</option>
-                </select>
-            </div>
             <div class="preset-selector">
-                <label for="visual-preset">Visual:</label>
                 <select id="visual-preset">
                     <option value="particles">Particles</option>
                     <option value="waves">Waves</option>
@@ -32,100 +21,126 @@
                     <option value="fluidDynamics">Fluid Dynamics</option>
                     <option value="neonGrid">Neon Grid</option>
                     <option value="galaxies">Galaxies</option>
-                    <!-- WebGL 3D Visualizations -->
+                    <option value="kaleidoscope">Kaleidoscope</option>
+                    <option value="lissajous">Lissajous</option>
+                    <option value="voronoi">Voronoi</option>
+                    <option value="tentacles">Tentacles</option>
+                    <option value="circuitBoard">Circuit Board</option>
+                    <option value="pixelFlow">Pixel Flow</option>
                     <option value="webgl-cubeField">3D Cube Field</option>
                     <option value="webgl-tunnelEffect">3D Tunnel</option>
                     <option value="webgl-particleSystem">3D Particles</option>
                 </select>
             </div>
-            <div class="preset-controls">
-                <button id="save-preset" title="Save current settings as preset">Save</button>
-                <select id="user-presets">
-                    <option value="">User Presets</option>
-                </select>
-                <button id="load-preset" title="Load selected preset">Load</button>
+            
+            <div class="midi-status">
+                <div class="indicator"></div>
+                <span>MIDI</span>
+                <button class="rescan-midi-button" title="Rescan MIDI devices">↻</button>
+                <select id="midi-input"></select>
             </div>
+            
+            <div class="preset-controls">
+                <select id="user-presets">
+                    <option value="">-- User Presets --</option>
+                </select>
+                <button id="load-preset">Load</button>
+                <button id="save-preset">Save</button>
+            </div>
+            
             <div class="fps-counter">FPS: <span id="fps">0</span></div>
+            
             <div class="help-toggle">
-                <button id="help-button" title="Show MIDI Mappings">?</button>
+                <button id="help-button" title="MIDI Mappings & Help">?</button>
             </div>
         </div>
         
         <div class="show-controls-button">⚙️</div>
-        
-        <!-- Help Panel with MIDI Mappings -->
-        <div id="help-panel" class="help-panel">
-            <div class="help-panel-header">
-                <h2>MIDI CC Mappings</h2>
-                <button id="close-help">×</button>
+    </div>
+    
+    <div id="help-panel" class="help-panel">
+        <div class="help-panel-header">
+            <h2>MIDI Mappings & Controls</h2>
+            <button id="close-help">×</button>
+        </div>
+        <div class="help-panel-content">
+            <div class="midi-learn-controls">
+                <span id="learn-status">Click "Learn" and move a controller to map it</span>
+                <button id="cancel-learn" class="hidden">Cancel</button>
             </div>
             
-            <div class="help-panel-content">
-                <div class="mapping-table-container">
-                    <table id="midi-mapping-table" class="mapping-table">
-                        <thead>
-                            <tr>
-                                <th>Parameter</th>
-                                <th>CC#</th>
-                                <th>Value</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <!-- Table will be populated by JavaScript -->
-                        </tbody>
-                    </table>
-                </div>
-                
-                <div class="help-panel-footer">
-                    <div class="midi-learn-controls">
-                        <div id="learn-status">Click "Learn" and move a controller to map it</div>
-                        <button id="cancel-learn" class="hidden">Cancel</button>
-                    </div>
-                    <div class="keyboard-shortcuts">
-                        <h3>Keyboard Shortcuts</h3>
-                        <ul>
-                            <li><kbd>1</kbd>-<kbd>9</kbd>: Increase parameters</li>
-                            <li><kbd>Shift</kbd>+<kbd>1</kbd>-<kbd>9</kbd>: Decrease parameters</li>
-                            <li><kbd>Space</kbd>: Randomize parameters</li>
-                            <li><kbd>→</kbd> / <kbd>←</kbd>: Change preset</li>
-                            <li><kbd>F</kbd>: Fullscreen</li>
-                            <li><kbd>H</kbd>: Hide controls</li>
-                            <li><kbd>M</kbd>: Show/hide MIDI mappings</li>
-                            <li><kbd>L</kbd>: Toggle Live Mode (hide all UI)</li>
-                        </ul>
-                        <br>
-                        <p>Your settings are automatically saved and restored when you reopen the app. You can also save named presets with the Save/Load buttons.</p>
-                    </div>
-                    
-                    <div class="program-changes">
-                        <h3>MIDI Program Changes</h3>
-                        <table>
-                            <tr>
-                                <th>Program #</th>
-                                <th>Visual</th>
-                            </tr>
-                            <tr><td>0</td><td>Particles</td></tr>
-                            <tr><td>1</td><td>Waves</td></tr>
-                            <tr><td>2</td><td>Grid</td></tr>
-                            <tr><td>3</td><td>Fractals</td></tr>
-                            <tr><td>4</td><td>Audio Reactive</td></tr>
-                            <tr><td>5</td><td>Fluid Dynamics</td></tr>
-                            <tr><td>6</td><td>Neon Grid</td></tr>
-                            <tr><td>7</td><td>Galaxies</td></tr>
-                            <tr><td>8</td><td>3D Cube Field (beta)</td></tr>
-                            <tr><td>9</td><td>3D Tunnel (beta)</td></tr>
-                            <tr><td>10</td><td>3D Particles (beta)</td></tr>
-                        </table>
-                    </div>
-                </div>
+            <div class="mapping-table-container">
+                <table class="mapping-table" id="midi-mapping-table">
+                    <thead>
+                        <tr>
+                            <th>Parameter</th>
+                            <th>CC#</th>
+                            <th>Value</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Filled dynamically by JavaScript -->
+                    </tbody>
+                </table>
+            </div>
+            
+            <div class="keyboard-shortcuts">
+                <h3>Keyboard Shortcuts</h3>
+                <ul>
+                    <li><kbd>1</kbd>-<kbd>9</kbd>: Increase parameters (<kbd>Shift</kbd>+<kbd>1</kbd>-<kbd>9</kbd> to decrease)</li>
+                    <li><kbd>Space</kbd>: Randomize parameters</li>
+                    <li><kbd>Arrow keys</kbd>: Change visual preset</li>
+                    <li><kbd>F</kbd>: Toggle fullscreen</li>
+                    <li><kbd>H</kbd>: Hide/show controls</li>
+                    <li><kbd>M</kbd>: Show MIDI mappings</li>
+                    <li><kbd>L</kbd>: Toggle LIVE MODE (hide all UI for projection)</li>
+                    <li><kbd>X</kbd>/<kbd>Y</kbd>/<kbd>Z</kbd>: 3D rotation/translation</li>
+                    <li><kbd>R</kbd>: Reset 3D transformations</li>
+                </ul>
+            </div>
+            
+            <div class="program-changes">
+                <h3>Program Changes</h3>
+                <table>
+                    <tr><th>PC#</th><th>Visualization</th></tr>
+                    <tr><td>0</td><td>Particles</td></tr>
+                    <tr><td>1</td><td>Waves</td></tr>
+                    <tr><td>2</td><td>Grid</td></tr>
+                    <tr><td>3</td><td>Fractals</td></tr>
+                    <tr><td>4</td><td>Audio Reactive</td></tr>
+                    <tr><td>5</td><td>Fluid Dynamics</td></tr>
+                    <tr><td>6</td><td>Neon Grid</td></tr>
+                    <tr><td>7</td><td>Galaxies</td></tr>
+                    <tr><td>8</td><td>Kaleidoscope</td></tr>
+                    <tr><td>9</td><td>Lissajous</td></tr>
+                    <tr><td>10</td><td>Voronoi</td></tr>
+                    <tr><td>11</td><td>Tentacles</td></tr>
+                    <tr><td>12</td><td>Circuit Board</td></tr>
+                    <tr><td>13</td><td>Pixel Flow</td></tr>
+                    <tr><td>14</td><td>3D Cube Field</td></tr>
+                    <tr><td>15</td><td>3D Tunnel</td></tr>
+                    <tr><td>16</td><td>3D Particles</td></tr>
+                </table>
             </div>
         </div>
     </div>
-
-    <!-- Three.js for 3D WebGL graphics -->
-    <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js"></script>
     
+    <!-- THREE.js library for WebGL visualizations -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- THREE.js post-processing effects -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/DigitalGlitch.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/GlitchPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/RGBShiftShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/VignetteShader.js"></script>
+    
+    <!-- Application scripts -->
     <script src="js/midi.js"></script>
     <script src="js/visuals.js"></script>
     <script src="js/webgl.js"></script>
