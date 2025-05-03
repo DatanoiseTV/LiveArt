@@ -57,7 +57,7 @@ class VisualEngine {
         this.targetParams = {...this.params};
         
         // Current visual algorithm
-        this.currentVisual = 'particles';
+        this.currentVisual = 'audioReactive';
         
         // Visual generator functions
         this.visualGenerators = {
@@ -1574,23 +1574,18 @@ class VisualEngine {
         
         // Map of visual names to their index for program change
         this.visualIndexMap = {
-            'particles': 0,
-            'waves': 1,
-            'grid': 2,
-            'fractals': 3,
-            'audioReactive': 4,
-            'fluidDynamics': 5,
-            'neonGrid': 6,
-            'galaxies': 7,
-            'kaleidoscope': 8,
-            'lissajous': 9,
-            'voronoi': 10,
-            'tentacles': 11,
-            'circuitBoard': 12,
-            'pixelFlow': 13,
-            'webgl-cubeField': 14,
-            'webgl-tunnelEffect': 15,
-            'webgl-particleSystem': 16
+            'audioReactive': 0,
+            'fluidDynamics': 1,
+            'galaxies': 2,
+            'tentacles': 3,
+            'webgl-cubeField': 4,
+            'webgl-tunnelEffect': 5,
+            'webgl-particleSystem': 6,
+            'webgl-trailParticles': 7,
+            'webgl-nebulaVortex': 8,
+            'webgl-crystalFractals': 9,
+            'webgl-oceanWaves': 10,
+            'webgl-crtOscilloscope': 11
         };
         
         // Reverse map for looking up by program change number
