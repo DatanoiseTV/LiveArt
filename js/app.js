@@ -1930,7 +1930,8 @@ document.addEventListener('DOMContentLoaded', () => {
             actionCell.appendChild(learnButton);
             
             // Unlearn button (only show if parameter is mapped)
-            const mappingEntries = Object.entries(MIDI_MAPPINGS).filter(([_, config]) => {
+            // Use a different variable name to avoid conflict with mappingEntries above
+            const currentMappings = Object.entries(MIDI_MAPPINGS).filter(([_, config]) => {
                 // Check basic param match
                 if (config.param !== paramConfig.param) return false;
                 
@@ -1943,12 +1944,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 return true;
             });
             
-            if (mappingEntries.length > 0) {
+            if (currentMappings.length > 0) {
                 const unlearnButton = document.createElement('button');
                 unlearnButton.className = 'unlearn-button';
                 unlearnButton.textContent = 'Unlearn';
                 unlearnButton.dataset.param = paramConfig.param;
-                unlearnButton.dataset.ccNumber = mappingEntries[0][0]; // Store the CC number to remove
+                unlearnButton.dataset.ccNumber = currentMappings[0][0]; // Store the CC number to remove
                 if (paramConfig.action) {
                     unlearnButton.dataset.action = paramConfig.action;
                 }
