@@ -424,6 +424,11 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             
             console.log(`Found ${audioInputs.length} audio input devices`);
+            
+            // Debug - if no labels, add a note
+            if (audioInputs.length > 0 && !audioInputs[0].label) {
+                console.warn('Device labels may be empty until permission is granted. Try refreshing after granting permission.');
+            }
         } catch (err) {
             console.error('Error listing audio devices:', err);
         }

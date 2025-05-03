@@ -804,8 +804,6 @@ class VisualEngine {
             this.audioData.timeDomainArray = timeDomainArray;
             this.audioData.audioContext = audioContext;
             
-            console.log(`Audio system created with buffer size ${this.audioData.bufferSize}, requesting microphone access...`);
-            
             // Set up constraints with device ID if specified
             const constraints = { 
                 audio: deviceId ? { deviceId: { exact: deviceId } } : true,
