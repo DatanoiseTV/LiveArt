@@ -56,6 +56,9 @@ class VisualEngine {
         // Target values for smooth interpolation
         this.targetParams = {...this.params};
         
+        // Smoothing initialization counter (for faster response on visualization changes)
+        this.smoothingInitCounter = 0;
+        
         // Current visual algorithm
         this.currentVisual = 'audioReactive';
         
@@ -192,28 +195,41 @@ class VisualEngine {
      * Set a parameter value
      * @param {string} paramName - Parameter name
      * @param {number} value - Parameter value (0-1)
+     * @param {boolean} immediate - Apply immediately without smoothing (defaults to false)
      */
-    setParam(paramName, value) {
+    setParam(paramName, value, immediate = false) {
         // Set target parameter for smoother transitions
         if (this.params.hasOwnProperty(paramName)) {
             // For the smoothing parameter itself, apply immediately with reactivity
-            if (paramName === 'smoothing') {
-                const reactivity = this.params.reactivity;
-                this.params[paramName] = this.params[paramName] * (1 - reactivity) + value * reactivity;
-                this.targetParams[paramName] = this.params[paramName];
+            if (paramName === 'smoothing' || immediate) {
+                // Apply directly without smoothing
+                this.params[paramName] = value;
+                this.targetParams[paramName] = value;
                 return;
             }
             
             // Apply reactivity to the target value
             const reactivity = this.params.reactivity;
             this.targetParams[paramName] = this.targetParams[paramName] * (1 - reactivity) + value * reactivity;
+            
+            // For audio reactivity, we need an immediate partial update to be responsive
+            // This ensures the engine responds quickly to audio/MIDI while still smoothing
+            if (paramName === 'reactivity') {
+                // Blend immediate and target values to improve responsiveness
+                this.params[paramName] = this.params[paramName] * 0.5 + value * 0.5;
+            }
         }
         
         // Check if this is an effect parameter
         if (this.effectParams && this.effectParams.hasOwnProperty(paramName)) {
-            // Apply reactivity for smooth transitions to target
-            const reactivity = this.params.reactivity || 0.5;
-            this.effectParams[paramName] = this.effectParams[paramName] * (1 - reactivity) + value * reactivity;
+            if (immediate) {
+                // Apply directly without smoothing
+                this.effectParams[paramName] = value;
+            } else {
+                // Apply reactivity for smooth transitions to target
+                const reactivity = this.params.reactivity || 0.5;
+                this.effectParams[paramName] = this.effectParams[paramName] * (1 - reactivity) + value * reactivity;
+            }
         }
         
         // Toggle effects globally - apply immediately without smoothing
@@ -225,6 +241,60 @@ class VisualEngine {
             if (!wasEnabled && this.effectsEnabled) {
                 this.resizeEffectBuffers();
             }
+        }
+    }
+    
+    /**
+     * Update parameters with smoothing based on target values
+     * @param {number} deltaTime - Time since last frame in milliseconds
+     */
+    updateParamsWithSmoothing(deltaTime) {
+        // Skip if delta time is unusually large (indicates a pause or tab switch)
+        if (deltaTime > 500) {
+            deltaTime = 16; // Use a default frame time
+        }
+        
+        // Calculate smoothing factor based on time delta
+        // This makes smoothing consistent regardless of framerate
+        const baseSpeed = 0.005;
+        const smoothingSpeed = baseSpeed * (deltaTime / 16);
+        
+        // Dynamic smoothing based on the smoothing parameter
+        const smoothingFactor = this.params.smoothing * 0.95;
+        const actualSpeed = smoothingSpeed * (1 - smoothingFactor);
+        
+        // Use different smoothing for initialization vs. regular updates
+        const isInitializing = this.smoothingInitCounter > 0;
+        
+        // For initialization, move more quickly to target value
+        const speed = isInitializing ? actualSpeed * 5 : actualSpeed;
+        
+        // Interpolate all parameters towards their target values
+        for (const key in this.params) {
+            if (key !== 'smoothing' && key in this.targetParams) {
+                // LERP from current to target
+                this.params[key] += (this.targetParams[key] - this.params[key]) * speed;
+            }
+        }
+        
+        // Decrement initialization counter if needed
+        if (this.smoothingInitCounter > 0) {
+            this.smoothingInitCounter--;
+        }
+    }
+    
+    /**
+     * Set the current visual/visualization mode
+     * @param {string} visualName - Name of the visualization to use
+     */
+    setVisualization(visualName) {
+        if (this.visualGenerators[visualName]) {
+            // If this is a different visualization, mark for smoothing initialization
+            if (this.currentVisual !== visualName) {
+                this.smoothingInitCounter = 60; // About 1 second of faster smoothing at 60fps
+            }
+            
+            this.currentVisual = visualName;
         }
     }
     
@@ -474,8 +544,13 @@ class VisualEngine {
      * @param {string} visualName - Name of the visual to use
      */
     setVisual(visualName) {
-        if (this.visualGenerators[visualName]) {
-            this.currentVisual = visualName;
+        // Use our improved setVisualization method which handles smoothing better
+        this.setVisualization(visualName);
+        
+        // Initialize parameters directly for immediate reactivity
+        // This prevents the "starting from defaults" issue when changing visualizations
+        for (const key in this.params) {
+            this.params[key] = this.targetParams[key];
         }
     }
     
