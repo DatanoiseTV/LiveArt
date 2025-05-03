@@ -56,6 +56,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const visualEngine = new VisualEngine('visualizer');
     const webglEngine = new WebGLVisuals('visualizer');
     
+    // Initialize audio system globally for all visualizations
+    visualEngine.initAudio();
+    console.log('Global audio system initialized');
+    
     // Track active visualization type
     let isWebGL = false;
     

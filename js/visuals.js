@@ -780,18 +780,23 @@ class VisualEngine {
             const AudioContext = window.AudioContext || window.webkitAudioContext;
             const audioContext = new AudioContext();
             
-            // Create analyzer - larger FFT size for better oscilloscope resolution
+            // Create analyzer with larger FFT size
             const analyser = audioContext.createAnalyser();
-            // Use larger FFT size for better oscilloscope resolution
-            analyser.fftSize = 512; // Larger size gives better time domain data
+            // For oscilloscope, we want more time-domain data points
+            analyser.fftSize = 1024; // Larger size for better oscilloscope resolution
             
-            // Set up data array
+            // Set up data arrays for both frequency and time domain
             const bufferLength = analyser.frequencyBinCount;
             const dataArray = new Uint8Array(bufferLength);
+            const timeDomainArray = new Uint8Array(analyser.fftSize);
             
             // Store in our audio data object
             this.audioData.analyser = analyser;
             this.audioData.dataArray = dataArray;
+            this.audioData.timeDomainArray = timeDomainArray;
+            this.audioData.audioContext = audioContext;
+            
+            console.log('Audio system created, requesting microphone access...');
             
             // Try to connect to user microphone
             navigator.mediaDevices.getUserMedia({ audio: true, video: false })
@@ -800,31 +805,87 @@ class VisualEngine {
                     const source = audioContext.createMediaStreamSource(stream);
                     source.connect(analyser);
                     
-                    console.log('Audio input initialized');
+                    // Store the stream in case we need to reconnect later
+                    this.audioData.stream = stream;
+                    this.audioData.micSource = source;
+                    
+                    // Ensure audio context is running
+                    if (audioContext.state !== 'running') {
+                        audioContext.resume().then(() => {
+                            console.log('Audio context resumed');
+                        });
+                    }
+                    
+                    console.log('Live audio input connected successfully');
                     this.audioData.initialized = true;
+                    this.audioData.liveAudioConnected = true;
                 })
                 .catch(err => {
                     console.warn('Error initializing audio input:', err);
-                    // Create some fake audio data for testing
+                    // Mark as initialized but without live audio
                     this.audioData.initialized = true;
+                    this.audioData.liveAudioConnected = false;
                     
-                    // Use noise for fake audio data
-                    setInterval(() => {
-                        for (let i = 0; i < bufferLength; i++) {
-                            // Create frequency distribution roughly resembling music
-                            // Lower frequencies have higher amplitude
-                            const baseFactor = 1 - (i / bufferLength); 
-                            const randomFactor = Math.random() * 0.4;
-                            // Occasional beats
-                            const beatFactor = (Math.sin(this.time * 2) > 0.7) ? 0.8 : 0.2;
-                            
-                            dataArray[i] = Math.floor((baseFactor * 0.6 + randomFactor + beatFactor * 0.4) * 255);
-                        }
-                    }, 50);
+                    // Generate synthetic data for testing
+                    this.startSyntheticAudioGeneration();
                 });
         } catch (e) {
             console.warn('Web Audio API not supported:', e);
+            this.audioData.initialized = true; // Mark as initialized to prevent further attempts
+            this.audioData.liveAudioConnected = false;
         }
+        
+        // Add a method to request audio context resume on user interaction
+        document.addEventListener('click', () => {
+            if (this.audioData.audioContext && this.audioData.audioContext.state !== 'running') {
+                this.audioData.audioContext.resume();
+                console.log('Audio context resumed on user interaction');
+            }
+        }, { once: true });
+    }
+    
+    /**
+     * Generate synthetic audio data for testing when live audio is unavailable
+     */
+    startSyntheticAudioGeneration() {
+        if (!this.audioData.analyser) return;
+        
+        const bufferLength = this.audioData.dataArray.length;
+        const timeDomainLength = this.audioData.timeDomainArray ? this.audioData.timeDomainArray.length : 0;
+        
+        console.log('Starting synthetic audio data generation');
+        
+        // Generate both frequency and time domain data
+        setInterval(() => {
+            // Update frequency data
+            for (let i = 0; i < bufferLength; i++) {
+                // Create frequency distribution resembling music
+                const baseFactor = 1 - (i / bufferLength); 
+                const randomFactor = Math.random() * 0.4;
+                const beatFactor = (Math.sin(this.time * 2) > 0.7) ? 0.8 : 0.2;
+                
+                this.audioData.dataArray[i] = Math.floor((baseFactor * 0.6 + randomFactor + beatFactor * 0.4) * 255);
+            }
+            
+            // Generate waveform data for oscilloscope
+            if (this.audioData.timeDomainArray && timeDomainLength > 0) {
+                const time = this.time;
+                
+                // Generate a mix of sine waves to simulate an interesting waveform
+                for (let i = 0; i < timeDomainLength; i++) {
+                    const phase = (i / timeDomainLength) * Math.PI * 2;
+                    
+                    // Create a waveform with multiple harmonics
+                    const value = 
+                        Math.sin(phase * 1 + time) * 0.5 +
+                        Math.sin(phase * 2 + time * 0.5) * 0.3 +
+                        Math.sin(phase * 4 + time * 0.25) * 0.15;
+                    
+                    // Convert to 0-255 range (128 is center/silence)
+                    this.audioData.timeDomainArray[i] = Math.floor((value * 0.7 + 1) * 128);
+                }
+            }
+        }, 16); // 60fps update rate
     }
     
     /**
@@ -837,8 +898,13 @@ class VisualEngine {
         }
         
         if (this.audioData.analyser) {
-            // Get frequency data
+            // Get frequency data for general visualizations
             this.audioData.analyser.getByteFrequencyData(this.audioData.dataArray);
+            
+            // Get time domain data specifically for oscilloscope
+            if (this.audioData.timeDomainArray) {
+                this.audioData.analyser.getByteTimeDomainData(this.audioData.timeDomainArray);
+            }
         }
         
         // Process the frequency data and smooth it
@@ -1571,9 +1637,14 @@ class VisualEngine {
         this.audioData = {
             analyser: null,
             dataArray: null,
+            timeDomainArray: null,
+            audioContext: null,
+            stream: null,
+            micSource: null,
             smoothedValues: Array(128).fill(0),
             peakLevel: 0.1,
-            initialized: false
+            initialized: false,
+            liveAudioConnected: false
         };
         
         // Map of visual names to their index for program change
@@ -2157,10 +2228,7 @@ class VisualEngine {
      * This provides a 2D canvas-based alternative to the WebGL implementation
      */
     renderOscilloscope() {
-        // Make sure audio is initialized
-        if (!this.audioData.initialized) {
-            this.initAudio();
-        }
+        // Audio is initialized globally on app startup
         this.updateAudioData();
         
         // Get parameters
@@ -2186,62 +2254,69 @@ class VisualEngine {
         let xData = [];
         let yData = [];
         
-        // Try to get audio data for the oscilloscope
-        let useRealAudio = false;
-        let timeData = null;
+        // Default point count for visualization
         let pointCount = 256;
         
-        // Check if audio system is initialized with valid analyzer
-        if (this.audioData.initialized && this.audioData.analyser) {
-            try {
-                const analyser = this.audioData.analyser;
-                const scopeBufferSize = analyser.fftSize;
-                
-                // Create buffer for time domain data
-                timeData = new Uint8Array(scopeBufferSize);
-                
-                // Get time domain data (waveform)
-                analyser.getByteTimeDomainData(timeData);
-                
-                // Check if we have actual data (not just silence which would be all 128)
-                for (let i = 0; i < timeData.length; i++) {
-                    if (Math.abs(timeData[i] - 128) > 2) { // Check for non-silent data
-                        useRealAudio = true;
-                        break;
-                    }
+        // Check if we have time domain data from audio input
+        let hasLiveAudio = false;
+        
+        if (this.audioData.initialized && this.audioData.timeDomainArray) {
+            // Use the time domain data directly
+            const timeData = this.audioData.timeDomainArray;
+            const timeDataLength = timeData.length;
+            
+            // Check if we have non-silent data (not all center values)
+            for (let i = 0; i < timeData.length; i += 16) { // Check every 16th sample for speed
+                if (Math.abs(timeData[i] - 128) > 3) { // Using small threshold for noise
+                    hasLiveAudio = true;
+                    break;
                 }
+            }
+            
+            if (hasLiveAudio) {
+                // We have audio input, use real-time waveform for X/Y
+                pointCount = Math.min(512, timeDataLength / 2);
                 
-                if (useRealAudio) {
-                    // Use time domain data for the oscilloscope
-                    pointCount = Math.min(256, scopeBufferSize / 2);
+                // Split the buffer in half for X and Y data
+                // This creates a Lissajous pattern from a single audio source
+                const halfLength = Math.floor(timeDataLength / 2);
+                
+                for (let i = 0; i < pointCount; i++) {
+                    // Map our point index to audio data indices
+                    const xIndex = Math.floor(i * halfLength / pointCount);
+                    const yIndex = halfLength + Math.floor(i * halfLength / pointCount);
                     
-                    for (let i = 0; i < pointCount; i++) {
-                        // Map loop index to data indices for X and Y channels
-                        const xIndex = Math.floor(i * (scopeBufferSize / 2) / pointCount);
-                        const yIndex = Math.floor(i * (scopeBufferSize / 2) / pointCount) + (scopeBufferSize / 2);
-                        
-                        // Convert from 0-255 range to -1.0 to 1.0 range
-                        xData[i] = (timeData[xIndex] / 128.0 - 1.0);
-                        yData[i] = (timeData[yIndex % scopeBufferSize] / 128.0 - 1.0);
-                        
-                        // Apply phase offset for better Lissajous patterns
-                        const phaseOffset = time * 0.1;
-                        const oldX = xData[i];
-                        const oldY = yData[i];
-                        const cosPhase = Math.cos(phaseOffset);
-                        const sinPhase = Math.sin(phaseOffset);
-                        
-                        yData[i] = oldY * cosPhase + oldX * sinPhase * complexity * 0.2;
-                    }
+                    // Convert data from 0-255 range to -1.0 to 1.0 range
+                    // 128 is the center/silence value
+                    xData[i] = (timeData[xIndex] / 128.0 - 1.0);
+                    yData[i] = (timeData[yIndex % timeDataLength] / 128.0 - 1.0);
                 }
-            } catch (error) {
-                console.warn("Oscilloscope audio error:", error.message);
-                useRealAudio = false;
+                
+                // Apply phase rotation for more interesting patterns
+                // This simulates a phase difference between channels
+                // which is crucial for getting good Lissajous figures
+                const phaseOffset = (complexity * 0.1) + (Math.sin(time * 0.1) * 0.05);
+                
+                // Apply the phase shift to create circular/elliptical patterns
+                for (let i = 0; i < pointCount; i++) {
+                    const x = xData[i];
+                    const y = yData[i];
+                    
+                    // Rotate the point by the phase offset
+                    const cosPhase = Math.cos(phaseOffset);
+                    const sinPhase = Math.sin(phaseOffset);
+                    
+                    // Apply rotation matrix
+                    xData[i] = x * cosPhase - y * sinPhase;
+                    yData[i] = x * sinPhase + y * cosPhase;
+                }
+                
+                console.log("Using live audio for oscilloscope");
             }
         }
         
-        // Generate synthetic waveforms if we couldn't get real audio data
-        if (!useRealAudio) {
+        // If we don't have live audio, generate synthetic patterns
+        if (!hasLiveAudio) {
             // Create X and Y data as sine/cosine waves with phase differences
             // This produces classic Lissajous patterns
             for (let i = 0; i < pointCount; i++) {
