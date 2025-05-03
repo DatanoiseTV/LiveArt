@@ -1128,7 +1128,7 @@ document.addEventListener('DOMContentLoaded', () => {
         { param: 'speed', name: 'Animation Speed' },
         { param: 'size', name: 'Element Size' },
         { param: 'complexity', name: 'Complexity' },
-        { param: 'rotation', name: 'Rotation' },
+        { param: 'rotation', name: 'Rotation', min: 0, max: 1, custom: true },
         { param: 'zoom', name: 'Zoom', min: 0.5, max: 2.0 },
         { param: 'noiseScale', name: 'Pattern Scale', min: 0.001, max: 0.05 },
         { param: 'noiseSpeed', name: 'Pattern Speed', min: 0.001, max: 0.01 },
@@ -1215,7 +1215,7 @@ document.addEventListener('DOMContentLoaded', () => {
             7: { param: 'complexity', name: 'Complexity' },
             
             // Secondary parameters
-            8: { param: 'rotation', name: 'Rotation' },
+            8: { param: 'rotation', name: 'Rotation', min: 0, max: 1, custom: true }, // Will handle 0-359° mapping in handler
             9: { param: 'zoom', name: 'Zoom', min: 0.5, max: 2.0 },
             10: { param: 'noiseScale', name: 'Pattern Scale', min: 0.001, max: 0.05 },
             11: { param: 'noiseSpeed', name: 'Pattern Speed', min: 0.001, max: 0.01 },
@@ -1359,6 +1359,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Note: 3D WebGL Controls (rotationX, rotationY, translationZ) are now handled
                 // as regular parameters below, not as special actions
             }
+        }
+        
+        // Custom handling for rotation parameter - map from 0-127 to 0-359 degrees
+        if (mapping.param === 'rotation' && mapping.custom === true) {
+            // Map MIDI value (0-1) to 0-359 degrees for display purposes
+            const degreesValue = Math.round(value * 359);
+            
+            // Display degrees in console for feedback
+            console.log(`Rotation: ${degreesValue}° (${value.toFixed(2)})`);
+            
+            // We keep using the normalized value (0-1) for internal parameter
+            // since different visualizations scale this appropriately
+            mappedValue = value;
         }
         
         // Handle visualization-specific parameters (new style)
@@ -2243,7 +2256,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 fill.style.width = `${valuePercent}%`;
                 
                 // Update the display value
-                if (paramConfig.integer) {
+                if (paramConfig.param === 'rotation' && paramConfig.custom === true) {
+                    // Show rotation in degrees (0-359°)
+                    const degrees = Math.round(value * 359);
+                    text.textContent = `${degrees}°`;
+                } else if (paramConfig.integer) {
                     text.textContent = Math.round(value);
                 } else {
                     text.textContent = value.toFixed(2);
@@ -2309,7 +2326,13 @@ document.addEventListener('DOMContentLoaded', () => {
             
             // Check standard parameters
             if (paramConfig.param !== 'special' && visualEngine.params[paramConfig.param] !== undefined) {
-                currentValue = visualEngine.params[paramConfig.param].toFixed(2);
+                // For rotation, show in degrees when custom flag is true
+                if (paramConfig.param === 'rotation' && paramConfig.custom === true) {
+                    const degrees = Math.round(visualEngine.params[paramConfig.param] * 359);
+                    currentValue = `${degrees}°`;
+                } else {
+                    currentValue = visualEngine.params[paramConfig.param].toFixed(2);
+                }
                 valuePercent = (visualEngine.params[paramConfig.param] * 100).toFixed(0);
                 if (valuePercent > 100) valuePercent = 100;
                 if (valuePercent < 0) valuePercent = 0;
