@@ -18,6 +18,20 @@ class VisualEngine {
         this.isRunning = false;
         this.frameId = null;
         
+        // Post-processing effects
+        this.effectsEnabled = false;
+        this.effectParams = {
+            glitchIntensity: 0,
+            chromaticAberration: 0,
+            pixelate: 0,
+            vignette: 0,
+            bloom: 0,
+            feedbackAmount: 0
+        };
+        
+        // Create offscreen buffers for effects
+        this.createEffectBuffers();
+        
         // Visual parameters (default values)
         this.params = {
             // Core parameters
@@ -50,7 +64,14 @@ class VisualEngine {
             audioReactive: this.renderAudioReactive.bind(this),
             fluidDynamics: this.renderFluidDynamics.bind(this),
             neonGrid: this.renderNeonGrid.bind(this),
-            galaxies: this.renderGalaxies.bind(this)
+            galaxies: this.renderGalaxies.bind(this),
+            // New visualizations
+            kaleidoscope: this.renderKaleidoscope.bind(this),
+            lissajous: this.renderLissajous.bind(this),
+            voronoi: this.renderVoronoi.bind(this),
+            tentacles: this.renderTentacles.bind(this),
+            circuitBoard: this.renderCircuitBoard.bind(this),
+            pixelFlow: this.renderPixelFlow.bind(this)
         };
         
         // We'll initialize visualization specific state after all methods are defined
@@ -121,16 +142,278 @@ class VisualEngine {
         // Update FPS counter
         this.updateFPS(delta);
         
-        // Clear canvas
-        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-        
-        // Render current visual
-        if (this.visualGenerators[this.currentVisual]) {
-            this.visualGenerators[this.currentVisual](delta);
+        // Clear canvas - if using effects, clear mainBuffer instead
+        if (this.effectsEnabled && this.mainBuffer) {
+            // Clear the main buffer
+            this.mainBufferCtx.clearRect(0, 0, this.mainBuffer.width, this.mainBuffer.height);
+            
+            // Render to the main buffer
+            const originalCtx = this.ctx;
+            this.ctx = this.mainBufferCtx; // Temporarily redirect rendering
+            
+            // Render current visual to buffer
+            if (this.visualGenerators[this.currentVisual]) {
+                this.visualGenerators[this.currentVisual](delta);
+            }
+            
+            // Restore original context
+            this.ctx = originalCtx;
+            
+            // Clear the actual canvas
+            this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+            
+            // Apply post-processing effects
+            this.applyPostProcessing();
+        } else {
+            // Standard rendering without effects
+            this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+            
+            // Render current visual directly to canvas
+            if (this.visualGenerators[this.currentVisual]) {
+                this.visualGenerators[this.currentVisual](delta);
+            }
         }
         
         // Request next frame
         this.frameId = requestAnimationFrame(this.animate.bind(this));
+    }
+    
+    /**
+     * Set a parameter value
+     * @param {string} paramName - Parameter name
+     * @param {number} value - Parameter value (0-1)
+     */
+    setParam(paramName, value) {
+        // Set standard parameter
+        if (this.params.hasOwnProperty(paramName)) {
+            // Apply reactivity - blend between current and new value
+            const reactivity = this.params.reactivity;
+            this.params[paramName] = this.params[paramName] * (1 - reactivity) + value * reactivity;
+        }
+        
+        // Check if this is an effect parameter
+        if (this.effectParams && this.effectParams.hasOwnProperty(paramName)) {
+            // Apply reactivity for smooth transitions
+            const reactivity = this.params.reactivity || 0.5;
+            this.effectParams[paramName] = this.effectParams[paramName] * (1 - reactivity) + value * reactivity;
+        }
+        
+        // Toggle effects globally
+        if (paramName === 'effectsEnabled') {
+            this.effectsEnabled = value > 0.5;
+        }
+    }
+    
+    /**
+     * Create offscreen buffers for post-processing effects
+     */
+    createEffectBuffers() {
+        try {
+            // Main buffer to render the scene into
+            this.mainBuffer = document.createElement('canvas');
+            this.mainBufferCtx = this.mainBuffer.getContext('2d');
+            
+            // Feedback buffer for trails and echoes
+            this.feedbackBuffer = document.createElement('canvas');
+            this.feedbackBufferCtx = this.feedbackBuffer.getContext('2d');
+            
+            // Bloom buffer for glow effects
+            this.bloomBuffer = document.createElement('canvas');
+            this.bloomBufferCtx = this.bloomBuffer.getContext('2d');
+            
+            // Update buffer sizes on canvas resize
+            this.resizeEffectBuffers();
+            
+            // Register resize handler
+            window.addEventListener('resize', () => this.resizeEffectBuffers());
+        } catch (e) {
+            console.warn('Could not create effect buffers:', e);
+            this.effectsEnabled = false;
+        }
+    }
+    
+    /**
+     * Resize effect buffers when canvas size changes
+     */
+    resizeEffectBuffers() {
+        if (!this.canvas) return;
+        
+        // Get current canvas size
+        const width = this.canvas.width;
+        const height = this.canvas.height;
+        
+        // Resize all buffers
+        if (this.mainBuffer) {
+            this.mainBuffer.width = width;
+            this.mainBuffer.height = height;
+        }
+        
+        if (this.feedbackBuffer) {
+            this.feedbackBuffer.width = width;
+            this.feedbackBuffer.height = height;
+        }
+        
+        if (this.bloomBuffer) {
+            this.bloomBuffer.width = width;
+            this.bloomBuffer.height = height;
+        }
+    }
+    
+    /**
+     * Apply post-processing effects to the rendered scene
+     */
+    applyPostProcessing() {
+        if (!this.effectsEnabled) return;
+        
+        // Cache params for easier access
+        const { glitchIntensity, chromaticAberration, pixelate, vignette, bloom, feedbackAmount } = this.effectParams;
+        
+        // Use main buffer if any effects are active
+        if (glitchIntensity > 0 || chromaticAberration > 0 || pixelate > 0 || 
+            vignette > 0 || bloom > 0 || feedbackAmount > 0) {
+            
+            // Apply feedback effect (trails/echoes)
+            if (feedbackAmount > 0 && this.feedbackBuffer) {
+                // Draw previous frame with fading
+                this.feedbackBufferCtx.globalAlpha = feedbackAmount;
+                this.feedbackBufferCtx.drawImage(this.canvas, 0, 0);
+                
+                // Apply the feedback to the main buffer with a blend
+                this.mainBufferCtx.globalAlpha = 0.3;
+                this.mainBufferCtx.globalCompositeOperation = 'lighter';
+                this.mainBufferCtx.drawImage(this.feedbackBuffer, 0, 0);
+                this.mainBufferCtx.globalAlpha = 1.0;
+                this.mainBufferCtx.globalCompositeOperation = 'source-over';
+            }
+            
+            // Apply bloom effect
+            if (bloom > 0 && this.bloomBuffer) {
+                // Copy main buffer to bloom buffer
+                this.bloomBufferCtx.clearRect(0, 0, this.bloomBuffer.width, this.bloomBuffer.height);
+                this.bloomBufferCtx.drawImage(this.mainBuffer, 0, 0);
+                
+                // Apply blur to the bloom buffer
+                const blurAmount = bloom * 20;
+                this.bloomBufferCtx.filter = `blur(${blurAmount}px)`;
+                this.bloomBufferCtx.globalAlpha = bloom;
+                this.bloomBufferCtx.drawImage(this.mainBuffer, 0, 0);
+                this.bloomBufferCtx.filter = 'none';
+                this.bloomBufferCtx.globalAlpha = 1.0;
+                
+                // Apply bloom on top of the main buffer
+                this.mainBufferCtx.globalCompositeOperation = 'lighter';
+                this.mainBufferCtx.drawImage(this.bloomBuffer, 0, 0);
+                this.mainBufferCtx.globalCompositeOperation = 'source-over';
+            }
+            
+            // Apply chromatic aberration
+            if (chromaticAberration > 0) {
+                const offset = chromaticAberration * 10;
+                
+                // Create temporary canvas for each color channel
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = this.mainBuffer.width;
+                tempCanvas.height = this.mainBuffer.height;
+                const tempCtx = tempCanvas.getContext('2d');
+                
+                // Red channel (shifted left)
+                tempCtx.clearRect(0, 0, tempCanvas.width, tempCanvas.height);
+                tempCtx.globalCompositeOperation = 'source-over';
+                tempCtx.drawImage(this.mainBuffer, 0, 0);
+                tempCtx.globalCompositeOperation = 'multiply';
+                tempCtx.fillStyle = '#ff0000';
+                tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+                
+                this.ctx.globalCompositeOperation = 'lighter';
+                this.ctx.drawImage(tempCanvas, -offset, 0);
+                
+                // Blue channel (shifted right)
+                tempCtx.clearRect(0, 0, tempCanvas.width, tempCanvas.height);
+                tempCtx.globalCompositeOperation = 'source-over';
+                tempCtx.drawImage(this.mainBuffer, 0, 0);
+                tempCtx.globalCompositeOperation = 'multiply';
+                tempCtx.fillStyle = '#0000ff';
+                tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+                
+                this.ctx.drawImage(tempCanvas, offset, 0);
+                
+                // Green channel (centered)
+                tempCtx.clearRect(0, 0, tempCanvas.width, tempCanvas.height);
+                tempCtx.globalCompositeOperation = 'source-over';
+                tempCtx.drawImage(this.mainBuffer, 0, 0);
+                tempCtx.globalCompositeOperation = 'multiply';
+                tempCtx.fillStyle = '#00ff00';
+                tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+                
+                this.ctx.drawImage(tempCanvas, 0, 0);
+                this.ctx.globalCompositeOperation = 'source-over';
+                
+                return; // Skip the final composite as we've done it already
+            }
+            
+            // Apply pixelate effect
+            if (pixelate > 0) {
+                const pixelSize = Math.max(2, Math.floor(pixelate * 20));
+                
+                // Create a smaller version and scale back up for pixelation
+                const tempCanvas = document.createElement('canvas');
+                const tempCtx = tempCanvas.getContext('2d');
+                
+                tempCanvas.width = this.mainBuffer.width / pixelSize;
+                tempCanvas.height = this.mainBuffer.height / pixelSize;
+                
+                tempCtx.drawImage(this.mainBuffer, 0, 0, tempCanvas.width, tempCanvas.height);
+                
+                this.ctx.imageSmoothingEnabled = false;
+                this.ctx.drawImage(tempCanvas, 0, 0, this.canvas.width, this.canvas.height);
+                this.ctx.imageSmoothingEnabled = true;
+                
+                return; // Skip the final composite as we've done it already
+            }
+            
+            // Apply vignette effect
+            if (vignette > 0) {
+                const gradient = this.ctx.createRadialGradient(
+                    this.canvas.width / 2, this.canvas.height / 2, 0,
+                    this.canvas.width / 2, this.canvas.height / 2, this.canvas.width / 2
+                );
+                
+                gradient.addColorStop(0, 'rgba(0,0,0,0)');
+                gradient.addColorStop(1 - vignette * 0.5, 'rgba(0,0,0,0)');
+                gradient.addColorStop(1, 'rgba(0,0,0,0.8)');
+                
+                this.ctx.fillStyle = gradient;
+                this.ctx.globalCompositeOperation = 'multiply';
+                this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+                this.ctx.globalCompositeOperation = 'source-over';
+            }
+            
+            // Apply glitch effect
+            if (glitchIntensity > 0) {
+                // Only apply occasionally based on intensity
+                if (Math.random() < glitchIntensity * 0.1) {
+                    // Random glitch slices
+                    const numSlices = Math.floor(glitchIntensity * 10) + 1;
+                    const sliceHeight = this.canvas.height / numSlices;
+                    
+                    for (let i = 0; i < numSlices; i++) {
+                        const y = i * sliceHeight;
+                        const offsetX = (Math.random() - 0.5) * glitchIntensity * 100;
+                        
+                        this.ctx.drawImage(
+                            this.mainBuffer,
+                            0, y, this.canvas.width, sliceHeight,
+                            offsetX, y, this.canvas.width, sliceHeight
+                        );
+                    }
+                    
+                    return; // Skip the final composite as we've done it already
+                }
+            }
+            
+            // Composite the main buffer to the canvas if we haven't already
+            this.ctx.drawImage(this.mainBuffer, 0, 0);
+        }
     }
     
     /**
@@ -1267,9 +1550,15 @@ class VisualEngine {
             'fluidDynamics': 5,
             'neonGrid': 6,
             'galaxies': 7,
-            'webgl-cubeField': 8,
-            'webgl-tunnelEffect': 9,
-            'webgl-particleSystem': 10
+            'kaleidoscope': 8,
+            'lissajous': 9,
+            'voronoi': 10,
+            'tentacles': 11,
+            'circuitBoard': 12,
+            'pixelFlow': 13,
+            'webgl-cubeField': 14,
+            'webgl-tunnelEffect': 15,
+            'webgl-particleSystem': 16
         };
         
         // Reverse map for looking up by program change number
@@ -1278,5 +1567,557 @@ class VisualEngine {
             const index = this.visualIndexMap[name];
             this.programChangeMap[index] = name;
         });
+    }
+    
+    /**
+     * Render kaleidoscope visualization
+     * Highly responsive to MIDI controls
+     */
+    renderKaleidoscope() {
+        // Parameters
+        const hue = this.params.hue;
+        const saturation = this.params.saturation;
+        const brightness = this.params.brightness;
+        const segments = Math.floor(this.mapParam(this.params.symmetry, 3, 16)); // Number of mirror segments
+        const shapeCount = Math.floor(this.mapParam(this.params.density, 5, 30));
+        const size = this.mapParam(this.params.size, 0.1, 0.5);
+        const speed = this.mapParam(this.params.speed, 0.2, 2);
+        const complexity = this.mapParam(this.params.complexity, 1, 8);
+        
+        // Calculate the size of the kaleidoscope
+        const radius = Math.min(this.width, this.height) * 0.5;
+        
+        // Save context for transformations
+        this.ctx.save();
+        this.ctx.translate(this.centerX, this.centerY);
+        this.ctx.rotate(this.time * 0.1 * this.mapParam(this.params.rotation, -0.5, 0.5));
+        
+        // Create clipping mask for circular kaleidoscope
+        this.ctx.beginPath();
+        this.ctx.arc(0, 0, radius, 0, Math.PI * 2);
+        this.ctx.clip();
+        
+        // Draw mirrored segments
+        for (let segment = 0; segment < segments; segment++) {
+            // Calculate the angle for this segment
+            const segmentAngle = (segment / segments) * Math.PI * 2;
+            
+            this.ctx.save();
+            this.ctx.rotate(segmentAngle);
+            
+            // Draw shapes within this segment
+            for (let i = 0; i < shapeCount; i++) {
+                // Calculate position using noise and time
+                const noiseScale = this.mapParam(this.params.noiseScale, 0.001, 0.01);
+                const t = this.time * speed + i * 0.1;
+                
+                const distance = radius * size * (1 + this.noise(i, t, 0));
+                const angle = this.noise(i + 10, t, 1) * Math.PI / segments;
+                
+                const x = Math.cos(angle) * distance;
+                const y = Math.sin(angle) * distance;
+                
+                // Vary shape based on noise and complexity
+                const shapeType = Math.floor(this.noise(i * 0.1, t * 0.1, 2) * complexity) % 4;
+                
+                // Vary color for each shape
+                const shapeHue = (hue + this.noise(i * 0.05, t * 0.1, 3) * 0.3) % 1;
+                const alpha = 0.6 + 0.4 * this.noise(i * 0.2, t * 0.2, 4);
+                
+                // Set fill style with transparency for layering effect
+                this.ctx.fillStyle = this.hsbaToRgba(shapeHue, saturation, brightness, alpha);
+                
+                // Draw different shape types
+                const shapeSize = radius * 0.03 * (0.5 + this.noise(i, t * 0.5, 5));
+                
+                switch (shapeType) {
+                    case 0: // Circle
+                        this.ctx.beginPath();
+                        this.ctx.arc(x, y, shapeSize, 0, Math.PI * 2);
+                        this.ctx.fill();
+                        break;
+                        
+                    case 1: // Square
+                        this.ctx.fillRect(x - shapeSize, y - shapeSize, shapeSize * 2, shapeSize * 2);
+                        break;
+                        
+                    case 2: // Triangle
+                        this.ctx.beginPath();
+                        this.ctx.moveTo(x, y - shapeSize);
+                        this.ctx.lineTo(x + shapeSize, y + shapeSize);
+                        this.ctx.lineTo(x - shapeSize, y + shapeSize);
+                        this.ctx.closePath();
+                        this.ctx.fill();
+                        break;
+                        
+                    case 3: // Diamond
+                        this.ctx.beginPath();
+                        this.ctx.moveTo(x, y - shapeSize);
+                        this.ctx.lineTo(x + shapeSize, y);
+                        this.ctx.lineTo(x, y + shapeSize);
+                        this.ctx.lineTo(x - shapeSize, y);
+                        this.ctx.closePath();
+                        this.ctx.fill();
+                        break;
+                }
+            }
+            
+            this.ctx.restore();
+        }
+        
+        // Draw center point with glow
+        const centerGlow = this.ctx.createRadialGradient(0, 0, 0, 0, 0, radius * 0.2);
+        centerGlow.addColorStop(0, this.hsbaToRgba(hue, saturation, brightness, 0.7));
+        centerGlow.addColorStop(1, this.hsbaToRgba(hue, saturation, brightness, 0));
+        
+        this.ctx.fillStyle = centerGlow;
+        this.ctx.beginPath();
+        this.ctx.arc(0, 0, radius * 0.2, 0, Math.PI * 2);
+        this.ctx.fill();
+        
+        this.ctx.restore();
+    }
+
+    /**
+     * Render Lissajous curves visualization
+     * Very responsive to MIDI controls
+     */
+    renderLissajous() {
+        // Parameters
+        const hue = this.params.hue;
+        const saturation = this.params.saturation;
+        const brightness = this.params.brightness;
+        const curves = Math.floor(this.mapParam(this.params.density, 3, 15));
+        const lineWidth = this.mapParam(this.params.size, 1, 10);
+        const zoom = this.mapParam(this.params.zoom, 0.5, 1.5);
+        const speed = this.mapParam(this.params.speed, 0.2, 2);
+        
+        // Calculate the size of the visualization
+        const size = Math.min(this.width, this.height) * 0.4 * zoom;
+        
+        // Save the canvas state
+        this.ctx.save();
+        this.ctx.translate(this.centerX, this.centerY);
+        
+        // Draw each curve
+        for (let i = 0; i < curves; i++) {
+            // Calculate curve parameters
+            const t = this.time * speed * 0.2;
+            const progress = i / curves;
+            
+            // Dynamic frequency ratio creates interesting patterns
+            const freqX = 1 + Math.floor(this.mapParam(this.params.complexity, 1, 8) * progress);
+            const freqY = 1 + Math.floor(this.mapParam(this.params.complexity, 1, 8) * (1 - progress));
+            const phase = t + progress * Math.PI * 2;
+            
+            // Calculate curve color
+            const curveHue = (hue + progress * 0.5) % 1;
+            
+            // Draw the curve
+            this.ctx.beginPath();
+            this.ctx.strokeStyle = this.hsbaToRgba(curveHue, saturation, brightness, 0.7);
+            this.ctx.lineWidth = lineWidth * (1 - 0.5 * progress);
+            
+            // Use parametric equations to plot Lissajous curve
+            const points = 500;
+            for (let j = 0; j <= points; j++) {
+                const angle = (j / points) * Math.PI * 2;
+                
+                const x = Math.sin(angle * freqX + phase) * size;
+                const y = Math.sin(angle * freqY) * size;
+                
+                if (j === 0) {
+                    this.ctx.moveTo(x, y);
+                } else {
+                    this.ctx.lineTo(x, y);
+                }
+            }
+            
+            this.ctx.stroke();
+            
+            // Add glow effect
+            this.ctx.strokeStyle = this.hsbaToRgba(curveHue, saturation * 0.8, brightness, 0.3);
+            this.ctx.lineWidth = lineWidth * 3 * (1 - 0.5 * progress);
+            this.ctx.stroke();
+        }
+        
+        this.ctx.restore();
+    }
+    
+    /**
+     * Render Voronoi cell visualization
+     */
+    renderVoronoi() {
+        // Parameters
+        const hue = this.params.hue;
+        const saturation = this.params.saturation;
+        const brightness = this.params.brightness;
+        const cellCount = Math.floor(this.mapParam(this.params.density, 10, 100));
+        const cellSize = this.mapParam(this.params.size, 0.5, 2);
+        const speed = this.mapParam(this.params.speed, 0.1, 1);
+        
+        // Clear background
+        this.ctx.save();
+        this.ctx.fillStyle = this.hsbaToRgba((hue + 0.5) % 1, saturation * 0.2, brightness * 0.1, 1);
+        this.ctx.fillRect(0, 0, this.width, this.height);
+        
+        // Generate Voronoi cell points
+        const points = [];
+        for (let i = 0; i < cellCount; i++) {
+            // Use noise to create smooth movement
+            const angle = this.noise(i * 0.1, this.time * speed * 0.1, 0) * Math.PI * 2;
+            const radius = this.noise(i * 0.1, this.time * speed * 0.1, 1) * this.width * 0.4;
+            
+            // Calculate position with orbital movement
+            const x = this.centerX + Math.cos(angle + this.time * speed * 0.2) * radius;
+            const y = this.centerY + Math.sin(angle + this.time * speed * 0.2) * radius;
+            
+            points.push({ x, y });
+        }
+        
+        // Render Voronoi cells
+        for (let y = 0; y < this.height; y += 10) {
+            for (let x = 0; x < this.width; x += 10) {
+                // Find closest point
+                let closestDist = Infinity;
+                let closestIndex = 0;
+                let secondClosestDist = Infinity;
+                
+                for (let i = 0; i < points.length; i++) {
+                    const dist = Math.hypot(points[i].x - x, points[i].y - y);
+                    
+                    if (dist < closestDist) {
+                        secondClosestDist = closestDist;
+                        closestDist = dist;
+                        closestIndex = i;
+                    } else if (dist < secondClosestDist) {
+                        secondClosestDist = dist;
+                    }
+                }
+                
+                // Calculate color based on distance and point index
+                const cellHue = (hue + closestIndex * 0.02) % 1;
+                const distRatio = closestDist / secondClosestDist;
+                const alpha = 0.5 + 0.5 * (1 - distRatio);
+                
+                // Draw cell
+                this.ctx.fillStyle = this.hsbaToRgba(cellHue, saturation, brightness, alpha);
+                this.ctx.fillRect(x, y, 10, 10);
+                
+                // Draw cell borders if complexity is high
+                if (this.params.complexity > 0.7 && distRatio > 0.9) {
+                    this.ctx.fillStyle = this.hsbaToRgba(cellHue, saturation * 0.5, brightness * 1.5, 0.8);
+                    this.ctx.fillRect(x, y, 10, 10);
+                }
+            }
+        }
+        
+        this.ctx.restore();
+    }
+    
+    /**
+     * Render flowing tentacle/ribbon effect
+     */
+    renderTentacles() {
+        // Parameters
+        const hue = this.params.hue;
+        const saturation = this.params.saturation;
+        const brightness = this.params.brightness;
+        const tentacleCount = Math.floor(this.mapParam(this.params.density, 3, 20));
+        const thickness = this.mapParam(this.params.size, 1, 20);
+        const speed = this.mapParam(this.params.speed, 0.1, 1);
+        const waviness = this.mapParam(this.params.complexity, 1, 10);
+        
+        // Clear with gradient background
+        this.ctx.save();
+        const gradient = this.ctx.createRadialGradient(
+            this.centerX, this.centerY, 0,
+            this.centerX, this.centerY, this.width
+        );
+        gradient.addColorStop(0, this.hsbaToRgba(hue, saturation * 0.2, brightness * 0.2, 1));
+        gradient.addColorStop(1, this.hsbaToRgba((hue + 0.1) % 1, saturation * 0.1, brightness * 0.1, 1));
+        this.ctx.fillStyle = gradient;
+        this.ctx.fillRect(0, 0, this.width, this.height);
+        
+        // Draw each tentacle
+        for (let i = 0; i < tentacleCount; i++) {
+            const tentacleHue = (hue + i / tentacleCount) % 1;
+            const startAngle = (i / tentacleCount) * Math.PI * 2 + this.time * speed * 0.2;
+            const length = Math.min(this.width, this.height) * 0.9;
+            
+            // Generate the tentacle path
+            this.ctx.beginPath();
+            
+            // Start at center
+            this.ctx.moveTo(this.centerX, this.centerY);
+            
+            // Create control points for the curve
+            const points = 100;
+            for (let j = 0; j <= points; j++) {
+                const t = j / points;
+                const dist = t * length;
+                
+                // Base angle changes with distance from center
+                const angle = startAngle + t * Math.PI * this.params.rotation * 2;
+                
+                // Add waviness with noise
+                const waveX = Math.sin(t * Math.PI * waviness + this.time * speed) * dist * 0.2;
+                const waveY = Math.cos(t * Math.PI * waviness + this.time * speed) * dist * 0.2;
+                
+                // Calculate position
+                const x = this.centerX + Math.cos(angle) * dist + waveX;
+                const y = this.centerY + Math.sin(angle) * dist + waveY;
+                
+                if (j === 0) {
+                    this.ctx.moveTo(x, y);
+                } else {
+                    this.ctx.lineTo(x, y);
+                }
+            }
+            
+            // Style based on parameters
+            this.ctx.strokeStyle = this.hsbaToRgba(tentacleHue, saturation, brightness, 0.7);
+            this.ctx.lineWidth = thickness * (1 - i / tentacleCount / 2); // Thinner as index increases
+            this.ctx.stroke();
+            
+            // Add glow
+            this.ctx.shadowColor = this.hsbaToRgba(tentacleHue, saturation, brightness, 0.5);
+            this.ctx.shadowBlur = thickness * 2;
+            this.ctx.stroke();
+            this.ctx.shadowBlur = 0;
+        }
+        
+        this.ctx.restore();
+    }
+    
+    /**
+     * Render circuit board pattern
+     */
+    renderCircuitBoard() {
+        // Parameters
+        const hue = this.params.hue;
+        const saturation = this.params.saturation;
+        const brightness = this.params.brightness;
+        const nodeCount = Math.floor(this.mapParam(this.params.density, 10, 100));
+        const nodeSize = this.mapParam(this.params.size, 2, 15);
+        const lineWidth = this.mapParam(this.params.size, 1, 5);
+        const complexity = this.mapParam(this.params.complexity, 0.1, 1);
+        
+        // Background
+        this.ctx.save();
+        this.ctx.fillStyle = this.hsbaToRgba(hue, saturation * 0.1, brightness * 0.1, 1);
+        this.ctx.fillRect(0, 0, this.width, this.height);
+        
+        // Generate nodes with noise-based placement
+        const nodes = [];
+        for (let i = 0; i < nodeCount; i++) {
+            const x = this.noise(i * 0.1, 0, this.time * 0.01) * this.width;
+            const y = this.noise(0, i * 0.1, this.time * 0.01) * this.height;
+            
+            // Each node connects to several others
+            const connections = [];
+            
+            nodes.push({ x, y, connections });
+        }
+        
+        // Generate connections between nodes
+        for (let i = 0; i < nodes.length; i++) {
+            const node = nodes[i];
+            const maxConnections = Math.floor(complexity * 5) + 1;
+            
+            // Find closest nodes to connect to
+            const potentialConnections = [];
+            
+            for (let j = 0; j < nodes.length; j++) {
+                if (i === j) continue;
+                
+                const otherNode = nodes[j];
+                const dist = Math.hypot(node.x - otherNode.x, node.y - otherNode.y);
+                
+                // Only connect to nearby nodes
+                if (dist < this.width * 0.2) {
+                    potentialConnections.push({ index: j, distance: dist });
+                }
+            }
+            
+            // Sort by distance and take closest
+            potentialConnections.sort((a, b) => a.distance - b.distance);
+            
+            // Connect to closest few nodes
+            const connectionCount = Math.min(maxConnections, potentialConnections.length);
+            
+            for (let c = 0; c < connectionCount; c++) {
+                const targetIndex = potentialConnections[c].index;
+                
+                // Avoid duplicate connections
+                if (!node.connections.includes(targetIndex)) {
+                    node.connections.push(targetIndex);
+                }
+            }
+        }
+        
+        // Draw connections first (background layer)
+        this.ctx.lineWidth = lineWidth;
+        
+        for (let i = 0; i < nodes.length; i++) {
+            const node = nodes[i];
+            
+            for (const targetIndex of node.connections) {
+                const targetNode = nodes[targetIndex];
+                
+                // Calculate line color based on position and nodes
+                const connectionHue = (hue + (i + targetIndex) * 0.01) % 1;
+                
+                // Draw line with glow
+                this.ctx.strokeStyle = this.hsbaToRgba(connectionHue, saturation * 0.8, brightness * 0.8, 0.8);
+                this.ctx.beginPath();
+                this.ctx.moveTo(node.x, node.y);
+                
+                // Add bends to the lines if complexity is high
+                if (complexity > 0.6 && Math.random() < 0.5) {
+                    // Calculate midpoint
+                    const midX = (node.x + targetNode.x) / 2;
+                    const midY = (node.y + targetNode.y) / 2;
+                    
+                    // Add perpendicular offset
+                    const dx = targetNode.x - node.x;
+                    const dy = targetNode.y - node.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    
+                    // Perpendicular direction
+                    const bendX = -dy / dist * dist * 0.2;
+                    const bendY = dx / dist * dist * 0.2;
+                    
+                    // Add bend point
+                    this.ctx.lineTo(midX + bendX, midY + bendY);
+                }
+                
+                this.ctx.lineTo(targetNode.x, targetNode.y);
+                this.ctx.stroke();
+            }
+        }
+        
+        // Draw nodes on top
+        for (let i = 0; i < nodes.length; i++) {
+            const node = nodes[i];
+            const nodeHue = (hue + i * 0.01) % 1;
+            
+            // Draw node with glow
+            const hasManyConnections = node.connections.length > 3;
+            const importantNode = hasManyConnections || Math.random() < 0.2;
+            
+            // Draw glow for node
+            const glowSize = importantNode ? nodeSize * 2 : nodeSize * 1.5;
+            const gradient = this.ctx.createRadialGradient(
+                node.x, node.y, 0,
+                node.x, node.y, glowSize
+            );
+            gradient.addColorStop(0, this.hsbaToRgba(nodeHue, saturation, brightness, 0.8));
+            gradient.addColorStop(1, this.hsbaToRgba(nodeHue, saturation, brightness, 0));
+            
+            this.ctx.fillStyle = gradient;
+            this.ctx.beginPath();
+            this.ctx.arc(node.x, node.y, glowSize, 0, Math.PI * 2);
+            this.ctx.fill();
+            
+            // Draw node center
+            const actualSize = importantNode ? nodeSize : nodeSize * 0.7;
+            this.ctx.fillStyle = this.hsbaToRgba(nodeHue, saturation, brightness, 1);
+            this.ctx.beginPath();
+            this.ctx.arc(node.x, node.y, actualSize, 0, Math.PI * 2);
+            this.ctx.fill();
+            
+            // Draw special pattern for important nodes
+            if (importantNode) {
+                this.ctx.strokeStyle = this.hsbaToRgba(0, 0, 1, 0.5);
+                this.ctx.lineWidth = 1;
+                this.ctx.beginPath();
+                this.ctx.arc(node.x, node.y, actualSize * 0.7, 0, Math.PI * 2);
+                this.ctx.stroke();
+            }
+        }
+        
+        this.ctx.restore();
+    }
+    
+    /**
+     * Render pixel flow field visualization
+     */
+    renderPixelFlow() {
+        // Parameters
+        const hue = this.params.hue;
+        const saturation = this.params.saturation;
+        const brightness = this.params.brightness;
+        const particleCount = Math.floor(this.mapParam(this.params.density, 500, 5000));
+        const particleSize = this.mapParam(this.params.size, 1, 5);
+        const speed = this.mapParam(this.params.speed, 0.1, 2);
+        const complexity = this.mapParam(this.params.complexity, 1, 10);
+        const rotation = this.params.rotation * Math.PI * 2; // Rotation affects flow direction
+        
+        // Initialize particles if needed
+        if (!this.flowParticles || this.flowParticles.length !== particleCount) {
+            this.flowParticles = [];
+            for (let i = 0; i < particleCount; i++) {
+                this.flowParticles.push({
+                    x: Math.random() * this.width,
+                    y: Math.random() * this.height,
+                    age: Math.random() * 100
+                });
+            }
+        }
+        
+        // Create a dark background
+        this.ctx.save();
+        this.ctx.fillStyle = this.hsbaToRgba(hue, saturation * 0.2, brightness * 0.05, 0.1);
+        this.ctx.fillRect(0, 0, this.width, this.height);
+        
+        // Update and draw particles
+        for (let i = 0; i < this.flowParticles.length; i++) {
+            const p = this.flowParticles[i];
+            
+            // Calculate flow field direction at this point
+            const noiseScale = 0.005 * complexity;
+            const noiseT = this.time * 0.2 * speed;
+            
+            // Use noise to create smooth flow field
+            const angle = this.noise(p.x * noiseScale, p.y * noiseScale, noiseT) * Math.PI * 2 + rotation;
+            
+            // Update position
+            const moveSpeed = speed * 2;
+            p.x += Math.cos(angle) * moveSpeed;
+            p.y += Math.sin(angle) * moveSpeed;
+            
+            // Update age
+            p.age += 0.5 * speed;
+            
+            // Reset if out of bounds or too old
+            if (p.x < 0 || p.x > this.width || p.y < 0 || p.y > this.height || p.age > 100) {
+                p.x = Math.random() * this.width;
+                p.y = Math.random() * this.height;
+                p.age = 0;
+            }
+            
+            // Calculate color based on position and flow field
+            const particleHue = (hue + this.noise(p.x * 0.01, p.y * 0.01, 0) * 0.2) % 1;
+            const alpha = 0.8 - p.age / 100 * 0.6;
+            
+            // Draw particle as a small circle with motion blur
+            this.ctx.fillStyle = this.hsbaToRgba(particleHue, saturation, brightness, alpha);
+            
+            // Create motion blur effect by drawing a small line in direction of movement
+            this.ctx.beginPath();
+            this.ctx.moveTo(p.x, p.y);
+            this.ctx.lineTo(p.x - Math.cos(angle) * particleSize * 2, p.y - Math.sin(angle) * particleSize * 2);
+            this.ctx.lineWidth = particleSize;
+            this.ctx.strokeStyle = this.hsbaToRgba(particleHue, saturation, brightness, alpha * 0.5);
+            this.ctx.stroke();
+            
+            // Draw particle head
+            this.ctx.beginPath();
+            this.ctx.arc(p.x, p.y, particleSize, 0, Math.PI * 2);
+            this.ctx.fill();
+        }
+        
+        this.ctx.restore();
     }
 }

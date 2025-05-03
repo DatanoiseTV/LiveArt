@@ -295,12 +295,24 @@ select:focus {
 
 .value-bar {
     flex-grow: 1;
-    height: 6px;
+    height: 8px;
     background-color: #333;
-    border-radius: 3px;
+    border-radius: 4px;
     overflow: hidden;
     position: relative;
     margin-right: 10px;
+    cursor: pointer;
+    transition: height 0.2s, background-color 0.2s;
+}
+
+.value-bar:hover {
+    height: 10px;
+    background-color: #444;
+}
+
+.value-bar:active {
+    height: 12px;
+    background-color: #555;
 }
 
 .value-fill {
@@ -308,6 +320,23 @@ select:focus {
     background-color: #4CAF50;
     width: 0%;
     transition: width 0.2s;
+    position: relative;
+}
+
+.value-fill::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    background-color: #fff;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.value-bar:hover .value-fill::after {
+    opacity: 0.7;
 }
 
 .value-text {
@@ -348,13 +377,52 @@ select:focus {
 .midi-learn-controls {
     display: flex;
     align-items: center;
-    margin-bottom: 20px;
+    margin-bottom: 10px;
 }
 
 #learn-status {
     font-size: 0.9em;
     color: #ccc;
     margin-right: 10px;
+}
+
+/* MIDI CC Map Management */
+.help-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.secondary-button {
+    background-color: #555;
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.85em;
+    transition: background-color 0.2s;
+}
+
+.secondary-button:hover {
+    background-color: #777;
+}
+
+#export-midi-map {
+    background-color: #FF9800;
+}
+
+#export-midi-map:hover {
+    background-color: #F57C00;
+}
+
+#import-midi-map {
+    background-color: #9C27B0;
+}
+
+#import-midi-map:hover {
+    background-color: #7B1FA2;
 }
 
 .hidden {
