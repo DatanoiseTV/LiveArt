@@ -538,7 +538,7 @@ class WebGLVisuals {
             if (THREE.ShaderPass && THREE.VignetteShader) {
                 this.vignettePass = new THREE.ShaderPass(THREE.VignetteShader);
                 this.vignettePass.uniforms.offset.value = 0.95;
-                this.vignettePass.uniforms.darkness.value = 0.0;
+                this.vignettePass.uniforms.darkness.value = 1.0; // Use black (1.0) instead of white
                 this.vignettePass.enabled = false; // Off by default
                 this.composer.addPass(this.vignettePass);
             }
