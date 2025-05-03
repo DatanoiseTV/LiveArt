@@ -1583,8 +1583,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 visualEngine.effectsEnabled = !visualEngine.effectsEnabled;
                 console.log(`2D Effects: ${visualEngine.effectsEnabled ? 'Enabled' : 'Disabled'}`);
                 
-                // Initialize some effect values if effects are enabled
+                // Ensure effect buffers are correctly sized when enabling effects
                 if (visualEngine.effectsEnabled) {
+                    visualEngine.resizeEffectBuffers();
+                    console.log('Resized effect buffers to match canvas size');
+                    
                     // Set default effect values if all at zero
                     let hasNonZeroEffect = false;
                     for (const key in visualEngine.effectParams) {
