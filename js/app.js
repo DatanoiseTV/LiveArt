@@ -2006,6 +2006,10 @@ document.addEventListener('DOMContentLoaded', () => {
     function updateMappingValues() {
         if (!helpPanelElement.classList.contains('active')) return;
         
+        // Get mapping table reference
+        const mappingTable = document.getElementById('midi-mapping-table')?.querySelector('tbody');
+        if (!mappingTable) return;
+        
         // Find value bars and update them
         const rows = mappingTable.querySelectorAll('tr');
         rows.forEach(row => {
