@@ -1565,12 +1565,26 @@ document.addEventListener('DOMContentLoaded', () => {
     const cancelLearnButton = document.getElementById('cancel-learn');
     const resetMidiMapButton = document.getElementById('reset-midi-map');
     
-    // Setup event listeners for help panel immediately after getting the elements
+    // Setup event listeners for all buttons immediately after getting the elements
     if (helpButton && closeHelpButton) {
         helpButton.addEventListener('click', toggleHelpPanel);
         closeHelpButton.addEventListener('click', toggleHelpPanel);
     } else {
         console.warn('Help panel buttons not found - they may not be properly defined in HTML');
+    }
+    
+    // Setup the cancel learn button
+    if (cancelLearnButton) {
+        cancelLearnButton.addEventListener('click', cancelLearnMode);
+    } else {
+        console.warn('Cancel learn button not found - MIDI learn cancellation may not work');
+    }
+    
+    // Setup the reset MIDI map button
+    if (resetMidiMapButton) {
+        resetMidiMapButton.addEventListener('click', resetMidiMappings);
+    } else {
+        console.warn('Reset MIDI map button not found - MIDI map reset may not work');
     }
     
     // Add elements for exporting/importing mappings
@@ -2078,11 +2092,8 @@ document.addEventListener('DOMContentLoaded', () => {
         saveMidiMappings();
     }
     
-    // Setup the cancel button
-    cancelLearnButton.addEventListener('click', cancelLearnMode);
-    
-    // Setup the reset MIDI map button
-    resetMidiMapButton.addEventListener('click', resetMidiMappings);
+    // Note: Event listeners for cancel button and reset MIDI map button are now 
+    // set up immediately after the elements are defined (around line 1580)
     
     // Object to store CC Map presets
     let ccMapPresets = {};
