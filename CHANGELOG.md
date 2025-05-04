@@ -18,11 +18,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Visual feedback for connection status
 - Interactive frequency band visualization in audio settings panel
 - Enhanced audio frequency to parameter mapping system with improved responsiveness
+- Modular code architecture with separate modules for core functionality, audio, MIDI, UI, and visuals
 
 ### Changed
 - Improved Mac compatibility by replacing Alt+1/7/3 shortcuts with P key to cycle through oscilloscope phosphor types
 - Enhanced sensitivity and impact of frequency-to-parameter mappings for more noticeable effects
 - Added real-time frequency band visualization with interactive tooltips
+- Refactored codebase from monolithic structure to modular architecture
+- Introduced event-based communication between modules for better separation of concerns
+- Improved code maintainability with clear module boundaries and responsibilities
 
 ### Fixed
 - Fixed auto-rotation in 3D visualizers to respect rotation=0 parameter

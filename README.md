@@ -69,6 +69,41 @@ cd LiveArt
 
 Open `index.html` in a web browser that supports the Web MIDI API (Chrome recommended).
 
+### Project Structure
+
+LiveArt is built with a modular architecture:
+
+```
+js/
+├── modules/               # Modular architecture
+│   ├── core/             # Core functionality
+│   │   ├── engine.js     # Main engine
+│   │   ├── events.js     # Event system
+│   │   ├── settings.js   # Settings management
+│   │   └── utils.js      # Utility functions
+│   ├── audio/            # Audio processing
+│   │   ├── audio-engine.js       # Audio input/analysis
+│   │   └── frequency-mapping.js  # Frequency to parameter mapping
+│   ├── midi/             # MIDI functionality
+│   │   ├── midi-controller.js    # MIDI device handling
+│   │   └── midi-mapping.js       # MIDI CC to parameter mapping
+│   ├── ui/               # User interface
+│   │   ├── ui-manager.js         # UI controls and panels
+│   │   └── frequency-visualizer.js # Frequency band visualization
+│   ├── visuals/          # Visual effects
+│   │   ├── visual-engine.js      # Base rendering engine
+│   │   └── various visualizations...
+│   ├── webgl/            # WebGL visualizations
+│   │   ├── webgl-engine.js       # 3D rendering engine
+│   │   └── various 3D scenes...
+│   ├── index.js          # Module registry
+│   └── main.js           # Application entry point
+├── app.js                # Legacy code (being deprecated)
+├── midi.js               # Legacy code (being deprecated)
+├── visuals.js            # Legacy code (being deprecated)
+└── webgl.js              # Legacy code (being deprecated)
+```
+
 ### Running Locally
 
 You can use any local web server to run LiveArt. For example:
@@ -82,6 +117,14 @@ npx serve
 ```
 
 Then open http://localhost:8000 in your browser.
+
+### Development Mode
+
+You can run LiveArt in debug mode to get more detailed logging:
+
+```
+http://localhost:8000/?debug=true
+```
 
 ### Browser Requirements
 
