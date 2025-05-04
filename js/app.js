@@ -420,6 +420,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const freqMappingsContainer = document.getElementById('freq-mappings-container');
     const addFreqMappingButton = document.getElementById('add-freq-mapping');
     const freqMappingTemplate = document.getElementById('freq-mapping-template');
+    const freqVisualizerCanvas = document.getElementById('freq-visualizer-canvas');
     
     // Initialize buffer size select with saved value
     if (bufferSizeSelect) {
@@ -785,6 +786,161 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Load frequency mappings into the UI on page load
     loadFreqMappingsUI();
+    
+    // Initialize the frequency visualizer
+    let freqVisualizerCtx = null;
+    let freqVisualizerAnimationId = null;
+    
+    if (freqVisualizerCanvas) {
+        freqVisualizerCtx = freqVisualizerCanvas.getContext('2d');
+        
+        // Set the canvas to the correct size with device pixel ratio
+        const dpr = window.devicePixelRatio || 1;
+        freqVisualizerCanvas.width = freqVisualizerCanvas.clientWidth * dpr;
+        freqVisualizerCanvas.height = freqVisualizerCanvas.clientHeight * dpr;
+        freqVisualizerCtx.scale(dpr, dpr);
+    }
+    
+    // Function to render the frequency visualizer
+    function renderFrequencyVisualizer() {
+        if (!freqVisualizerCtx || !visualEngine || !audioSettingsPanel.classList.contains('active')) {
+            // Stop animation if panel is not active
+            if (freqVisualizerAnimationId) {
+                cancelAnimationFrame(freqVisualizerAnimationId);
+                freqVisualizerAnimationId = null;
+            }
+            return;
+        }
+        
+        const ctx = freqVisualizerCtx;
+        const canvas = freqVisualizerCanvas;
+        const width = canvas.clientWidth;
+        const height = canvas.clientHeight;
+        
+        // Clear canvas
+        ctx.clearRect(0, 0, width, height);
+        
+        // Only proceed if we have audio data
+        if (visualEngine.audioData && visualEngine.audioData.smoothedValues) {
+            // Draw frequency bands
+            const barWidth = width / visualEngine.audioData.smoothedValues.length;
+            const bandColors = {
+                bass: '#FF5252',     // Red
+                lowMid: '#FFAB40',   // Orange
+                mid: '#FFEB3B',      // Yellow
+                highMid: '#4CAF50',  // Green
+                treble: '#2196F3'    // Blue
+            };
+            
+            // Draw background bands
+            Object.entries(visualEngine.freqMapping.bands).forEach(([band, range]) => {
+                const startX = (range.start / visualEngine.audioData.smoothedValues.length) * width;
+                const endX = (range.end / visualEngine.audioData.smoothedValues.length) * width;
+                const bandWidth = endX - startX;
+                
+                // Draw band background
+                ctx.fillStyle = `${bandColors[band]}22`; // Semi-transparent
+                ctx.fillRect(startX, 0, bandWidth, height);
+                
+                // Draw band dividers
+                ctx.strokeStyle = `${bandColors[band]}44`;
+                ctx.beginPath();
+                ctx.moveTo(endX, 0);
+                ctx.lineTo(endX, height);
+                ctx.stroke();
+            });
+            
+            // Draw frequency values
+            visualEngine.audioData.smoothedValues.forEach((value, i) => {
+                // Find which band this frequency belongs to
+                let bandColor = '#FFFFFF';
+                
+                for (const [band, range] of Object.entries(visualEngine.freqMapping.bands)) {
+                    if (i >= range.start && i <= range.end) {
+                        bandColor = bandColors[band];
+                        break;
+                    }
+                }
+                
+                const barHeight = value * height;
+                const x = i * barWidth;
+                
+                // Draw bar
+                ctx.fillStyle = bandColor;
+                ctx.fillRect(x, height - barHeight, barWidth, barHeight);
+            });
+            
+            // Draw hover indicator if active
+            if (freqVisualizerCanvas.hoveredIndex !== undefined) {
+                const i = freqVisualizerCanvas.hoveredIndex;
+                const value = visualEngine.audioData.smoothedValues[i] || 0;
+                const x = i * barWidth;
+                
+                // Highlight the bar
+                ctx.fillStyle = '#FFFFFF';
+                ctx.fillRect(x, height - value * height, barWidth, value * height);
+                
+                // Draw value tooltip
+                const tooltipText = `Bin ${i}: ${(value * 100).toFixed(1)}%`;
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                ctx.fillRect(x - 40, height - value * height - 25, 80, 20);
+                ctx.fillStyle = '#FFFFFF';
+                ctx.textAlign = 'center';
+                ctx.fillText(tooltipText, x, height - value * height - 10);
+            }
+        } else {
+            // No audio data, show placeholder message
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.font = '12px Arial';
+            ctx.fillText('No audio data available', width / 2, height / 2);
+        }
+        
+        // Request next frame
+        freqVisualizerAnimationId = requestAnimationFrame(renderFrequencyVisualizer);
+    }
+    
+    // Start/stop visualizer when audio settings panel is opened/closed
+    if (audioSettingsPanel) {
+        // Add mouse interaction to visualizer
+        if (freqVisualizerCanvas) {
+            freqVisualizerCanvas.addEventListener('mousemove', (e) => {
+                if (!visualEngine || !visualEngine.audioData || !visualEngine.audioData.smoothedValues) return;
+                
+                const rect = freqVisualizerCanvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const width = freqVisualizerCanvas.clientWidth;
+                
+                // Calculate hovered frequency bin
+                const index = Math.floor((x / width) * visualEngine.audioData.smoothedValues.length);
+                freqVisualizerCanvas.hoveredIndex = index;
+            });
+            
+            freqVisualizerCanvas.addEventListener('mouseleave', () => {
+                freqVisualizerCanvas.hoveredIndex = undefined;
+            });
+        }
+        
+        const observer = new MutationObserver((mutations) => {
+            mutations.forEach((mutation) => {
+                if (mutation.attributeName === 'class') {
+                    if (audioSettingsPanel.classList.contains('active')) {
+                        // Panel opened, start visualizer
+                        renderFrequencyVisualizer();
+                    } else {
+                        // Panel closed, stop visualizer
+                        if (freqVisualizerAnimationId) {
+                            cancelAnimationFrame(freqVisualizerAnimationId);
+                            freqVisualizerAnimationId = null;
+                        }
+                    }
+                }
+            });
+        });
+        
+        observer.observe(audioSettingsPanel, { attributes: true });
+    }
     
     function applyAudioSettings() {
         // Get values from the form

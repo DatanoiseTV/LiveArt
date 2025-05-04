@@ -16,14 +16,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Toggle floor grid visibility in 3D scenes with the 'G' key
 - Enhanced MIDI device connection with retry mechanism
 - Visual feedback for connection status
+- Interactive frequency band visualization in audio settings panel
+- Enhanced audio frequency to parameter mapping system with improved responsiveness
 
 ### Changed
 - Improved Mac compatibility by replacing Alt+1/7/3 shortcuts with P key to cycle through oscilloscope phosphor types
+- Enhanced sensitivity and impact of frequency-to-parameter mappings for more noticeable effects
+- Added real-time frequency band visualization with interactive tooltips
 
 ### Fixed
 - Fixed auto-rotation in 3D visualizers to respect rotation=0 parameter
 - Improved oscilloscope visualization with proper time domain audio processing
 - Enhanced X/Y Lissajous patterns in oscilloscope from mono audio input
+- Fixed frequency mapping functionality to properly influence parameters
 
 ## [0.2.0] - 2023-05-03
 

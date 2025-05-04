@@ -105,6 +105,20 @@
                         <label for="freq-smoothing">Smoothing</label>
                         <input type="range" id="freq-smoothing" min="0" max="1" step="0.01" value="0.7">
                     </div>
+                    
+                    <div class="freq-visualizer-container">
+                        <h4>Frequency Band Visualization</h4>
+                        <div class="freq-visualizer">
+                            <canvas id="freq-visualizer-canvas" height="60"></canvas>
+                            <div class="freq-band-markers">
+                                <span class="band-marker" style="left: 0%">Bass</span>
+                                <span class="band-marker" style="left: 25%">Low Mid</span>
+                                <span class="band-marker" style="left: 50%">Mid</span>
+                                <span class="band-marker" style="left: 75%">High Mid</span>
+                                <span class="band-marker" style="right: 0%">Treble</span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 
                 <div class="freq-mapping-list">

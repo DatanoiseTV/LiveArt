@@ -1282,6 +1282,9 @@ class VisualEngine {
             return;
         }
         
+        // Make sure audio data is up-to-date
+        this.updateAudioData();
+        
         // Process each mapping
         for (const mapping of this.freqMapping.mappings) {
             if (!mapping.active) continue;
@@ -1289,9 +1292,9 @@ class VisualEngine {
             // Get audio band value
             const bandValue = this.getAudioBand(mapping.start, mapping.end);
             
-            // Apply threshold
-            let influence = bandValue - this.freqMapping.minThreshold;
-            influence = Math.max(0, influence) * this.freqMapping.sensitivity;
+            // Apply threshold with increased sensitivity
+            let influence = bandValue - (this.freqMapping.minThreshold * 0.5); // Reduce threshold for more sensitivity
+            influence = Math.max(0, influence) * (this.freqMapping.sensitivity * 1.5); // Boost sensitivity
             
             // Apply maximum influence
             influence = Math.min(influence, this.freqMapping.maxInfluence);
@@ -1301,8 +1304,8 @@ class VisualEngine {
                 influence = -influence;
             }
             
-            // Scale by amount
-            influence *= mapping.amount;
+            // Scale by amount (increase effect for better visibility)
+            influence *= mapping.amount * 1.5; // Boost effect
             
             // Apply to parameter - add or multiply based on parameter type
             const currentValue = this.params[mapping.param] || 0;
@@ -1319,14 +1322,16 @@ class VisualEngine {
                 // Get current value without influence
                 const baseValue = this.targetParams[mapping.param] || 0.5;
                 
-                // Scale the influence based on the current value
-                // This ensures we don't go below 0 or above 1
-                const scaledInfluence = mapping.direction === "normal" 
-                    ? influence * (1 - baseValue)  // Room to grow upward
-                    : influence * baseValue;       // Room to decrease
+                // Apply influence directly for more noticeable effect
+                let newValue;
                 
-                // Apply influence
-                let newValue = baseValue + scaledInfluence;
+                if (mapping.direction === "normal") {
+                    // Normal direction: increase parameter with audio level
+                    newValue = baseValue + (influence * (1 - baseValue));
+                } else {
+                    // Inverted direction: decrease parameter with audio level
+                    newValue = baseValue - (influence * baseValue);
+                }
                 
                 // Clamp to 0-1 range
                 newValue = Math.max(0, Math.min(1, newValue));
