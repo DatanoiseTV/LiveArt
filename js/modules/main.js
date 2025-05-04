@@ -46,26 +46,45 @@ document.addEventListener('DOMContentLoaded', () => {
             debugMode
         });
         
-        // Initialize visual engines
-        const visualEngine = new VisualEngine('canvas-2d');
-        visualEngine.init();
+        // Initialize visual engines with error handling
+        try {
+            const visualEngine = new VisualEngine('canvas-2d');
+            if (!visualEngine.init()) {
+                throw new Error('Failed to initialize 2D visual engine');
+            }
+            LiveArt.log('2D visual engine initialized successfully');
+            
+            // Initialize visualizations
+            const oscilloscope = new OscilloscopeVisualizer(visualEngine);
+            oscilloscope.init();
+            
+            const audioReactive = new AudioReactiveVisualizer(visualEngine);
+            audioReactive.init();
+            
+            // Set initial visualization
+            const initialVisual = 'oscilloscope';
+            events.trigger('engine:visualChanged', {
+                visualId: initialVisual,
+                isWebGL: false
+            });
+        } catch (error) {
+            LiveArt.log(`Error initializing 2D engine: ${error.message}`, 'error');
+            console.error('2D engine error:', error);
+        }
         
-        const webglEngine = new WebGLEngine('container-3d');
-        webglEngine.init();
-        
-        // Initialize visualizations
-        const oscilloscope = new OscilloscopeVisualizer(visualEngine);
-        oscilloscope.init();
-        
-        const audioReactive = new AudioReactiveVisualizer(visualEngine);
-        audioReactive.init();
-        
-        // Set initial visualization
-        const initialVisual = 'oscilloscope';
-        events.trigger('engine:visualChanged', {
-            visualId: initialVisual,
-            isWebGL: false
-        });
+        try {
+            const webglEngine = new WebGLEngine('container-3d');
+            if (!webglEngine.init()) {
+                throw new Error('Failed to initialize WebGL engine');
+            }
+            LiveArt.log('WebGL engine initialized successfully');
+            
+            // WebGL visualizations would be initialized here
+            
+        } catch (error) {
+            LiveArt.log(`Error initializing WebGL engine: ${error.message}`, 'error');
+            console.error('WebGL engine error:', error);
+        }
         
         // Log initialization complete
         LiveArt.log('LiveArt initialized successfully!');

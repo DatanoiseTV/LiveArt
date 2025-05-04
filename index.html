@@ -8,7 +8,14 @@
 </head>
 <body>
     <div class="container">
-        <canvas id="visualizer"></canvas>
+        <!-- Canvas for 2D visualizations -->
+        <canvas id="canvas-2d"></canvas>
+        
+        <!-- Container for 3D WebGL visualizations -->
+        <div id="container-3d"></div>
+        
+        <!-- Legacy canvas (kept for backwards compatibility) -->
+        <canvas id="visualizer" style="display: none;"></canvas>
         
         <div class="controls">
             <div class="preset-selector">
