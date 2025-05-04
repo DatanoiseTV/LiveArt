@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enhanced MIDI device connection with retry mechanism
 - Visual feedback for connection status
 
+### Changed
+- Improved Mac compatibility by replacing Alt+1/7/3 shortcuts with P key to cycle through oscilloscope phosphor types
+
 ### Fixed
 - Fixed auto-rotation in 3D visualizers to respect rotation=0 parameter
 - Improved oscilloscope visualization with proper time domain audio processing

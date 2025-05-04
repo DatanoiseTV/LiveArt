@@ -2046,20 +2046,35 @@ document.addEventListener('DOMContentLoaded', () => {
             setTimeout(saveCurrentSettings, 500);
         }
         
-        // Phosphor type switching for oscilloscope (P1, P7, P3 keys)
+        // Phosphor type switching for oscilloscope
         // These match actual CRT phosphor designations used in analog oscilloscopes
         if (visualEngine.currentVisual === 'oscilloscope-stereo') {
-            if (e.key === '1' && e.altKey) {
-                visualEngine.setOscilloscopePhosphorType('p1'); // Green P1 phosphor
-                showNotification('P1 phosphor: Green medium-persistence');
-                throttledSave();
-            } else if (e.key === '7' && e.altKey) {
-                visualEngine.setOscilloscopePhosphorType('p7'); // Blue-yellow P7 phosphor
-                showNotification('P7 phosphor: Blue-yellow long-persistence');
-                throttledSave();
-            } else if (e.key === '3' && e.altKey) {
-                visualEngine.setOscilloscopePhosphorType('p31'); // Bright green P31 phosphor
-                showNotification('P31 phosphor: Bright green fast-decay');
+            if (e.key.toLowerCase() === 'p') {
+                // Cycle through phosphor types
+                const currentType = visualEngine.oscilloscopeBuffers.phosphorType;
+                let nextType;
+                
+                // Determine next phosphor type in the cycle
+                if (currentType === 'p1') {
+                    nextType = 'p7';
+                } else if (currentType === 'p7') {
+                    nextType = 'p31';
+                } else {
+                    nextType = 'p1';
+                }
+                
+                // Apply new phosphor type
+                visualEngine.setOscilloscopePhosphorType(nextType);
+                
+                // Show notification based on type
+                if (nextType === 'p1') {
+                    showNotification('P1 phosphor: Green medium-persistence');
+                } else if (nextType === 'p7') {
+                    showNotification('P7 phosphor: Blue-yellow long-persistence');
+                } else {
+                    showNotification('P31 phosphor: Bright green fast-decay');
+                }
+                
                 throttledSave();
             }
         }
