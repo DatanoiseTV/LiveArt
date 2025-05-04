@@ -150,6 +150,11 @@ class VisualEngine {
         // Update parameters with smoothing
         this.updateParamsWithSmoothing(delta);
         
+        // Process audio frequency mappings if enabled
+        if (this.freqMapping && this.freqMapping.enabled) {
+            this.processFrequencyMappings(delta);
+        }
+        
         // Update global time (scaled by speed)
         this.time += delta * 0.001 * this.mapParam(this.params.speed, 0.2, 2);
         
@@ -293,6 +298,29 @@ class VisualEngine {
             // If this is a different visualization, mark for smoothing initialization
             if (this.currentVisual !== visualName) {
                 this.smoothingInitCounter = 60; // About 1 second of faster smoothing at 60fps
+                
+                // Reset oscilloscope buffers when switching between oscilloscope types
+                const isFromOscilloscope = this.currentVisual === 'oscilloscope' || this.currentVisual === 'webgl-crtOscilloscope';
+                const isToOscilloscope = visualName === 'oscilloscope' || visualName === 'webgl-crtOscilloscope';
+                const isFromStereoOscilloscope = this.currentVisual === 'oscilloscope-stereo';
+                const isToStereoOscilloscope = visualName === 'oscilloscope-stereo';
+                
+                // Force reinitialization of buffers when switching to or between oscilloscope types
+                const isOscilloscopeType = isToOscilloscope || isToStereoOscilloscope;
+                if (isOscilloscopeType) {
+                    // Always reset the buffers when switching to or between oscilloscope types
+                    console.log("Reinitializing oscilloscope buffers for visualization change");
+                    if (this.oscilloscopeBuffers) {
+                        this.oscilloscopeBuffers.initialized = false;
+                        
+                        // Set appropriate phosphor type based on target visualization
+                        if (isToStereoOscilloscope) {
+                            this.oscilloscopeBuffers.phosphorType = 'p7'; // Blue-yellow phosphor
+                        } else {
+                            this.oscilloscopeBuffers.phosphorType = 'p31'; // Green phosphor
+                        }
+                    }
+                }
             }
             
             this.currentVisual = visualName;
@@ -1136,6 +1164,180 @@ class VisualEngine {
     }
     
     /**
+     * Add a new audio frequency to parameter mapping
+     * @param {string} band - Predefined band key or custom range "start-end"
+     * @param {string} param - Parameter name to control
+     * @param {number} amount - Amount of influence (0-1)
+     * @param {string} direction - "normal" or "inverted"
+     * @returns {string} - ID of the created mapping
+     */
+    addFrequencyMapping(band, param, amount = 0.5, direction = "normal") {
+        // Generate unique ID
+        const id = `mapping_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+        
+        // Determine frequency range
+        let start, end;
+        
+        if (this.freqMapping.bands[band]) {
+            // Use predefined band
+            start = this.freqMapping.bands[band].start;
+            end = this.freqMapping.bands[band].end;
+        } else if (band.includes('-')) {
+            // Parse custom range (format: "start-end")
+            const parts = band.split('-');
+            start = parseInt(parts[0], 10);
+            end = parseInt(parts[1], 10);
+        } else {
+            // Invalid band format
+            console.error(`Invalid frequency band: ${band}`);
+            return null;
+        }
+        
+        // Create mapping
+        const mapping = {
+            id,
+            band,
+            param,
+            amount,
+            direction,
+            start,
+            end,
+            active: true
+        };
+        
+        // Add to mappings array
+        this.freqMapping.mappings.push(mapping);
+        
+        // Enable frequency mapping if not already enabled
+        this.freqMapping.enabled = true;
+        
+        console.log(`Added frequency mapping: ${band} -> ${param} (${amount.toFixed(2)})`);
+        return id;
+    }
+    
+    /**
+     * Remove a frequency mapping by ID
+     * @param {string} id - Mapping ID to remove
+     * @returns {boolean} - Success
+     */
+    removeFrequencyMapping(id) {
+        const index = this.freqMapping.mappings.findIndex(m => m.id === id);
+        
+        if (index === -1) {
+            console.error(`Frequency mapping not found: ${id}`);
+            return false;
+        }
+        
+        // Remove mapping
+        this.freqMapping.mappings.splice(index, 1);
+        
+        // Disable frequency mapping if no mappings left
+        if (this.freqMapping.mappings.length === 0) {
+            this.freqMapping.enabled = false;
+        }
+        
+        console.log(`Removed frequency mapping: ${id}`);
+        return true;
+    }
+    
+    /**
+     * Update a frequency mapping
+     * @param {string} id - Mapping ID
+     * @param {Object} updates - Properties to update
+     * @returns {boolean} - Success
+     */
+    updateFrequencyMapping(id, updates) {
+        const mapping = this.freqMapping.mappings.find(m => m.id === id);
+        
+        if (!mapping) {
+            console.error(`Frequency mapping not found: ${id}`);
+            return false;
+        }
+        
+        // Apply updates
+        Object.assign(mapping, updates);
+        
+        // If band changed, update start/end
+        if (updates.band) {
+            if (this.freqMapping.bands[updates.band]) {
+                mapping.start = this.freqMapping.bands[updates.band].start;
+                mapping.end = this.freqMapping.bands[updates.band].end;
+            } else if (updates.band.includes('-')) {
+                const parts = updates.band.split('-');
+                mapping.start = parseInt(parts[0], 10);
+                mapping.end = parseInt(parts[1], 10);
+            }
+        }
+        
+        console.log(`Updated frequency mapping: ${id}`);
+        return true;
+    }
+    
+    /**
+     * Process all active frequency mappings and apply to parameters
+     * Should be called in animate() before rendering
+     */
+    processFrequencyMappings(deltaTime) {
+        if (!this.freqMapping.enabled || this.freqMapping.mappings.length === 0) {
+            return;
+        }
+        
+        // Process each mapping
+        for (const mapping of this.freqMapping.mappings) {
+            if (!mapping.active) continue;
+            
+            // Get audio band value
+            const bandValue = this.getAudioBand(mapping.start, mapping.end);
+            
+            // Apply threshold
+            let influence = bandValue - this.freqMapping.minThreshold;
+            influence = Math.max(0, influence) * this.freqMapping.sensitivity;
+            
+            // Apply maximum influence
+            influence = Math.min(influence, this.freqMapping.maxInfluence);
+            
+            // Apply direction
+            if (mapping.direction === "inverted") {
+                influence = -influence;
+            }
+            
+            // Scale by amount
+            influence *= mapping.amount;
+            
+            // Apply to parameter - add or multiply based on parameter type
+            const currentValue = this.params[mapping.param] || 0;
+            
+            // For some parameters like hue, we add influence (wrap around 0-1)
+            if (['hue', 'rotation'].includes(mapping.param)) {
+                let newValue = currentValue + influence;
+                // Wrap around 0-1
+                newValue = ((newValue % 1) + 1) % 1;
+                this.setParam(mapping.param, newValue, true);
+            } 
+            // For other parameters, we scale between min and max based on influence
+            else {
+                // Get current value without influence
+                const baseValue = this.targetParams[mapping.param] || 0.5;
+                
+                // Scale the influence based on the current value
+                // This ensures we don't go below 0 or above 1
+                const scaledInfluence = mapping.direction === "normal" 
+                    ? influence * (1 - baseValue)  // Room to grow upward
+                    : influence * baseValue;       // Room to decrease
+                
+                // Apply influence
+                let newValue = baseValue + scaledInfluence;
+                
+                // Clamp to 0-1 range
+                newValue = Math.max(0, Math.min(1, newValue));
+                
+                // Set parameter with immediate flag for responsive feel
+                this.setParam(mapping.param, newValue, true);
+            }
+        }
+    }
+    
+    /**
      * Render audio reactive visualization
      */
     renderAudioReactive() {
@@ -1813,6 +2015,25 @@ class VisualEngine {
             liveAudioConnected: false
         };
         
+        // Audio frequency to parameter mapping
+        this.freqMapping = {
+            enabled: false,
+            mappings: [],
+            // Predefined frequency bands for easy mapping
+            bands: {
+                bass: { start: 0, end: 10, name: "Bass" },
+                lowMid: { start: 11, end: 30, name: "Low Mid" },
+                mid: { start: 31, end: 60, name: "Mid" },
+                highMid: { start: 61, end: 90, name: "High Mid" },
+                treble: { start: 91, end: 127, name: "Treble" }
+            },
+            // Settings for frequency response
+            sensitivity: 0.5,
+            smoothing: 0.7,
+            minThreshold: 0.05,
+            maxInfluence: 0.8
+        };
+        
         // Oscilloscope persistence buffers for phosphor effect
         this.oscilloscopeBuffers = {
             initialized: false,
@@ -1825,10 +2046,10 @@ class VisualEngine {
             phosphorType: 'p7',           // Default phosphor type (p1, p7, p31)
             // Decay time constants in milliseconds - realistic values based on actual CRT phosphors
             decayConstants: {
-                // Fast decay - initial bright glow (ms)
-                p1: { fast: 50, medium: 200, slow: 500, veryLong: 1200 },
-                p7: { fast: 60, medium: 300, slow: 1500, veryLong: 5000 }, // Blue-to-yellow dual phosphor
-                p31: { fast: 35, medium: 100, slow: 250, veryLong: 600 }   // Fast decay green phosphor
+                // Fast decay - initial bright glow (ms) - reduced to prevent eternal burn-in
+                p1: { fast: 50, medium: 150, slow: 300, veryLong: 600 },
+                p7: { fast: 60, medium: 200, slow: 500, veryLong: 1200 }, // Blue-to-yellow dual phosphor
+                p31: { fast: 35, medium: 80, slow: 180, veryLong: 400 }   // Fast decay green phosphor
             },
             // Phosphor colors during decay phases
             phosphorColors: {
@@ -2507,8 +2728,8 @@ class VisualEngine {
                 // We have audio input, use real-time waveform for X/Y
                 pointCount = Math.min(512, timeDataLength / 2);
                 
-                // Split the buffer in half for X and Y data
-                // This creates a Lissajous pattern from a single audio source
+                // Use first half of buffer for left channel (X) and second half for right channel (Y)
+                // This creates a proper X/Y vectorscope where X = left channel, Y = right channel
                 const halfLength = Math.floor(timeDataLength / 2);
                 
                 // Find maximum deviation for auto-scaling
@@ -2527,38 +2748,22 @@ class VisualEngine {
                 const targetScale = Math.max(scaleFactor, 0.8);
                 
                 for (let i = 0; i < pointCount; i++) {
-                    // Map our point index to audio data indices
-                    const xIndex = Math.floor(i * halfLength / pointCount);
-                    const yIndex = halfLength + Math.floor(i * halfLength / pointCount);
+                    // Direct mapping to left (X) and right (Y) channels for true vectorscope
+                    const xIndex = Math.floor(i * halfLength / pointCount); // Left channel (X-axis)
+                    const yIndex = halfLength + Math.floor(i * halfLength / pointCount); // Right channel (Y-axis)
                     
                     // Convert data from 0-255 range to -1.0 to 1.0 range with scaling
                     // 128 is the center/silence value
-                    const xRaw = timeData[xIndex] - 128;
-                    const yRaw = timeData[yIndex % timeDataLength] - 128;
+                    const xRaw = timeData[xIndex] - 128; // Left channel
+                    const yRaw = timeData[yIndex % timeDataLength] - 128; // Right channel
                     
                     // Apply scaling to fill the display
                     xData[i] = (xRaw * targetScale) / 128.0;
                     yData[i] = (yRaw * targetScale) / 128.0;
                 }
                 
-                // Apply phase rotation for more interesting patterns
-                // This simulates a phase difference between channels
-                // which is crucial for getting good Lissajous figures
-                const phaseOffset = (complexity * 0.1) + (Math.sin(time * 0.1) * 0.05);
-                
-                // Apply the phase shift to create circular/elliptical patterns
-                for (let i = 0; i < pointCount; i++) {
-                    const x = xData[i];
-                    const y = yData[i];
-                    
-                    // Rotate the point by the phase offset
-                    const cosPhase = Math.cos(phaseOffset);
-                    const sinPhase = Math.sin(phaseOffset);
-                    
-                    // Apply rotation matrix
-                    xData[i] = x * cosPhase - y * sinPhase;
-                    yData[i] = x * sinPhase + y * cosPhase;
-                }
+                // No phase rotation - use direct L/R mapping for true vectorscope
+                // This ensures X = left channel, Y = right channel without modification
             }
         }
         
@@ -2634,6 +2839,10 @@ class VisualEngine {
      * Initialize oscilloscope buffers for phosphor persistence effect
      */
     initOscilloscopeBuffers() {
+        // Get current visualization type to customize behavior
+        const isRegularOscilloscope = this.currentVisual === 'oscilloscope' || this.currentVisual === 'webgl-crtOscilloscope';
+        const isStereoOscilloscope = this.currentVisual === 'oscilloscope-stereo';
+        
         // Only initialize once
         if (this.oscilloscopeBuffers.initialized) {
             // Check if canvas dimensions have changed
@@ -2687,6 +2896,15 @@ class VisualEngine {
         this.oscilloscopeBuffers.persistenceCtxLong = persistenceCtxLong;
         this.oscilloscopeBuffers.lastFrameTime = performance.now();
         this.oscilloscopeBuffers.initialized = true;
+        
+        // Set appropriate properties based on oscilloscope type
+        if (isStereoOscilloscope) {
+            // For stereo oscilloscope (blue-cyan phosphor)
+            this.oscilloscopeBuffers.phosphorType = 'p7'; // Blue-yellow phosphor  
+        } else {
+            // For regular oscilloscope (green phosphor)
+            this.oscilloscopeBuffers.phosphorType = 'p31'; // Green phosphor
+        }
         
         // Reset trace history
         this.oscilloscopeBuffers.traceHistory = [];
@@ -3453,14 +3671,18 @@ class VisualEngine {
                     }
                 }
             } else {
-                // If no valid audio data yet, create a placeholder Lissajous pattern
-                // Lissajous figures are characteristic of XY oscilloscopes
-                this.generateLissajousPattern(xData, yData, velocities, accelerations, 200, 3, 2, Math.PI/4);
+                // Create a simple dot in the center as a placeholder for no signal
+                xData = [0];
+                yData = [0];
+                velocities = [0];
+                accelerations = [0];
             }
         } else {
-            // No audio initialized, generate an interesting Lissajous pattern
-            // Use frequency ratio to create a more complex and visually appealing pattern
-            this.generateLissajousPattern(xData, yData, velocities, accelerations, 240, 3, 4, Math.PI/4);
+            // No audio initialized, create a simple dot in the center as a placeholder for no signal
+            xData = [0];
+            yData = [0];
+            velocities = [0];
+            accelerations = [0];
         }
         
         // Store current trace data for precise phosphor persistence simulation

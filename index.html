@@ -83,6 +83,91 @@
                 <p class="settings-help">Larger buffer sizes provide smoother audio visualization but more latency.</p>
             </div>
             
+            <div class="settings-group">
+                <h3>Frequency to Parameter Mapping</h3>
+                <p class="settings-help">Map audio frequency bands to control parameters automatically.</p>
+                
+                <div class="freq-mapping-controls">
+                    <div class="freq-mapping-toggle">
+                        <label for="freq-mapping-enabled">Enable Audio-Reactive Controls</label>
+                        <label class="switch">
+                            <input type="checkbox" id="freq-mapping-enabled">
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+                    
+                    <div class="freq-sensitivity-control">
+                        <label for="freq-sensitivity">Sensitivity</label>
+                        <input type="range" id="freq-sensitivity" min="0" max="1" step="0.01" value="0.5">
+                    </div>
+                    
+                    <div class="freq-smoothing-control">
+                        <label for="freq-smoothing">Smoothing</label>
+                        <input type="range" id="freq-smoothing" min="0" max="1" step="0.01" value="0.7">
+                    </div>
+                </div>
+                
+                <div class="freq-mapping-list">
+                    <div id="freq-mappings-container">
+                        <!-- Mappings will be added here dynamically -->
+                    </div>
+                    
+                    <button id="add-freq-mapping" class="add-mapping-button">+ Add Frequency Mapping</button>
+                </div>
+                
+                <!-- Mapping template (hidden, cloned when adding new mappings) -->
+                <template id="freq-mapping-template">
+                    <div class="freq-mapping-item">
+                        <div class="mapping-header">
+                            <span class="mapping-title">Frequency Mapping</span>
+                            <button class="remove-mapping">×</button>
+                        </div>
+                        <div class="mapping-controls">
+                            <div class="mapping-control">
+                                <label>Frequency Band</label>
+                                <select class="freq-band-select">
+                                    <option value="bass">Bass</option>
+                                    <option value="lowMid">Low Mid</option>
+                                    <option value="mid">Mid</option>
+                                    <option value="highMid">High Mid</option>
+                                    <option value="treble">Treble</option>
+                                    <option value="custom">Custom Range</option>
+                                </select>
+                                <div class="custom-range-inputs hidden">
+                                    <input type="number" class="custom-start" min="0" max="127" value="0">
+                                    <span>to</span>
+                                    <input type="number" class="custom-end" min="0" max="127" value="127">
+                                </div>
+                            </div>
+                            <div class="mapping-control">
+                                <label>Controls Parameter</label>
+                                <select class="param-select">
+                                    <option value="hue">Color Hue</option>
+                                    <option value="saturation">Color Saturation</option>
+                                    <option value="brightness">Brightness</option>
+                                    <option value="density">Density</option>
+                                    <option value="speed">Animation Speed</option>
+                                    <option value="size">Size</option>
+                                    <option value="complexity">Complexity</option>
+                                    <option value="rotation">Rotation</option>
+                                </select>
+                            </div>
+                            <div class="mapping-control">
+                                <label>Direction</label>
+                                <select class="direction-select">
+                                    <option value="normal">Normal</option>
+                                    <option value="inverted">Inverted</option>
+                                </select>
+                            </div>
+                            <div class="mapping-control">
+                                <label>Amount</label>
+                                <input type="range" class="amount-slider" min="0" max="1" step="0.01" value="0.5">
+                            </div>
+                        </div>
+                    </div>
+                </template>
+            </div>
+            
             <div class="settings-actions">
                 <button id="apply-audio-settings">Apply Settings</button>
             </div>

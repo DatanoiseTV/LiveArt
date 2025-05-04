@@ -52,7 +52,14 @@ let cancelLearnButton = null; // Button to cancel learning
 // Global audio settings
 let audioSettings = {
     selectedSourceId: null,
-    bufferSize: 512 // Default buffer size
+    bufferSize: 512, // Default buffer size
+    // Frequency mapping settings
+    freqMapping: {
+        enabled: false,
+        sensitivity: 0.5,
+        smoothing: 0.7,
+        mappings: []
+    }
 };
 
 // Load saved audio settings
@@ -88,6 +95,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initialize audio system globally with the saved settings
     visualEngine.initAudio(audioSettings.bufferSize, audioSettings.selectedSourceId);
     console.log('Global audio system initialized with settings:', audioSettings);
+    
+    // Initialize frequency mapping if enabled
+    if (audioSettings.freqMapping && audioSettings.freqMapping.enabled) {
+        applyFreqMappingsToEngine();
+    }
     
     // Track active visualization type
     let isWebGL = false;
@@ -401,9 +413,30 @@ document.addEventListener('DOMContentLoaded', () => {
     const refreshAudioSourcesButton = document.getElementById('refresh-audio-sources');
     const applyAudioSettingsButton = document.getElementById('apply-audio-settings');
     
+    // Frequency mapping UI elements
+    const freqMappingEnabledCheckbox = document.getElementById('freq-mapping-enabled');
+    const freqSensitivitySlider = document.getElementById('freq-sensitivity');
+    const freqSmoothingSlider = document.getElementById('freq-smoothing');
+    const freqMappingsContainer = document.getElementById('freq-mappings-container');
+    const addFreqMappingButton = document.getElementById('add-freq-mapping');
+    const freqMappingTemplate = document.getElementById('freq-mapping-template');
+    
     // Initialize buffer size select with saved value
     if (bufferSizeSelect) {
         bufferSizeSelect.value = audioSettings.bufferSize.toString();
+    }
+    
+    // Initialize frequency mapping UI with saved values
+    if (freqMappingEnabledCheckbox) {
+        freqMappingEnabledCheckbox.checked = audioSettings.freqMapping.enabled;
+    }
+    
+    if (freqSensitivitySlider) {
+        freqSensitivitySlider.value = audioSettings.freqMapping.sensitivity;
+    }
+    
+    if (freqSmoothingSlider) {
+        freqSmoothingSlider.value = audioSettings.freqMapping.smoothing;
     }
     
     // Function to list available audio input devices
@@ -440,6 +473,319 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     // Function to apply audio settings
+    // Function to create a new frequency mapping in the UI
+    function createFreqMappingUI(mappingData) {
+        if (!freqMappingTemplate) return;
+        
+        // Clone the template
+        const template = freqMappingTemplate.content.cloneNode(true);
+        const mappingItem = template.querySelector('.freq-mapping-item');
+        
+        // Set data attribute to store the mapping ID
+        mappingItem.dataset.mappingId = mappingData.id;
+        
+        // Set values for the controls
+        const bandSelect = mappingItem.querySelector('.freq-band-select');
+        const paramSelect = mappingItem.querySelector('.param-select');
+        const directionSelect = mappingItem.querySelector('.direction-select');
+        const amountSlider = mappingItem.querySelector('.amount-slider');
+        const customRangeInputs = mappingItem.querySelector('.custom-range-inputs');
+        const customStartInput = mappingItem.querySelector('.custom-start');
+        const customEndInput = mappingItem.querySelector('.custom-end');
+        
+        // Set values from mapping data
+        if (mappingData.band) {
+            if (bandSelect.querySelector(`option[value="${mappingData.band}"]`)) {
+                bandSelect.value = mappingData.band;
+            } else if (mappingData.band.includes('-')) {
+                // Custom range
+                bandSelect.value = 'custom';
+                customRangeInputs.classList.remove('hidden');
+                
+                const parts = mappingData.band.split('-');
+                customStartInput.value = parts[0];
+                customEndInput.value = parts[1];
+            }
+        }
+        
+        paramSelect.value = mappingData.param;
+        directionSelect.value = mappingData.direction;
+        amountSlider.value = mappingData.amount;
+        
+        // Set up event listeners
+        const removeButton = mappingItem.querySelector('.remove-mapping');
+        removeButton.addEventListener('click', () => {
+            // Find the mapping in the settings
+            const index = audioSettings.freqMapping.mappings.findIndex(m => m.id === mappingData.id);
+            if (index !== -1) {
+                // Remove from settings
+                audioSettings.freqMapping.mappings.splice(index, 1);
+                
+                // Remove from UI
+                mappingItem.remove();
+                
+                // Save settings
+                saveAudioSettings();
+                
+                // Update visual engine if enabled
+                if (audioSettings.freqMapping.enabled) {
+                    applyFreqMappingsToEngine();
+                }
+            }
+        });
+        
+        // Band select change event
+        bandSelect.addEventListener('change', () => {
+            const value = bandSelect.value;
+            const index = audioSettings.freqMapping.mappings.findIndex(m => m.id === mappingData.id);
+            
+            if (index !== -1) {
+                if (value === 'custom') {
+                    // Show custom range inputs
+                    customRangeInputs.classList.remove('hidden');
+                } else {
+                    // Hide custom range inputs
+                    customRangeInputs.classList.add('hidden');
+                    
+                    // Update band in settings
+                    audioSettings.freqMapping.mappings[index].band = value;
+                    
+                    // Save settings
+                    saveAudioSettings();
+                    
+                    // Update visual engine if enabled
+                    if (audioSettings.freqMapping.enabled) {
+                        applyFreqMappingsToEngine();
+                    }
+                }
+            }
+        });
+        
+        // Custom range inputs change event
+        [customStartInput, customEndInput].forEach(input => {
+            input.addEventListener('change', () => {
+                const start = parseInt(customStartInput.value, 10);
+                const end = parseInt(customEndInput.value, 10);
+                
+                if (start >= 0 && end >= start && end <= 127) {
+                    const customBand = `${start}-${end}`;
+                    const index = audioSettings.freqMapping.mappings.findIndex(m => m.id === mappingData.id);
+                    
+                    if (index !== -1) {
+                        // Update band in settings
+                        audioSettings.freqMapping.mappings[index].band = customBand;
+                        
+                        // Save settings
+                        saveAudioSettings();
+                        
+                        // Update visual engine if enabled
+                        if (audioSettings.freqMapping.enabled) {
+                            applyFreqMappingsToEngine();
+                        }
+                    }
+                }
+            });
+        });
+        
+        // Parameter select change event
+        paramSelect.addEventListener('change', () => {
+            const value = paramSelect.value;
+            const index = audioSettings.freqMapping.mappings.findIndex(m => m.id === mappingData.id);
+            
+            if (index !== -1) {
+                // Update param in settings
+                audioSettings.freqMapping.mappings[index].param = value;
+                
+                // Save settings
+                saveAudioSettings();
+                
+                // Update visual engine if enabled
+                if (audioSettings.freqMapping.enabled) {
+                    applyFreqMappingsToEngine();
+                }
+            }
+        });
+        
+        // Direction select change event
+        directionSelect.addEventListener('change', () => {
+            const value = directionSelect.value;
+            const index = audioSettings.freqMapping.mappings.findIndex(m => m.id === mappingData.id);
+            
+            if (index !== -1) {
+                // Update direction in settings
+                audioSettings.freqMapping.mappings[index].direction = value;
+                
+                // Save settings
+                saveAudioSettings();
+                
+                // Update visual engine if enabled
+                if (audioSettings.freqMapping.enabled) {
+                    applyFreqMappingsToEngine();
+                }
+            }
+        });
+        
+        // Amount slider change event
+        amountSlider.addEventListener('input', () => {
+            const value = parseFloat(amountSlider.value);
+            const index = audioSettings.freqMapping.mappings.findIndex(m => m.id === mappingData.id);
+            
+            if (index !== -1) {
+                // Update amount in settings
+                audioSettings.freqMapping.mappings[index].amount = value;
+                
+                // Save settings (but not too often for sliders)
+                if (!amountSlider.saveTimeout) {
+                    amountSlider.saveTimeout = setTimeout(() => {
+                        saveAudioSettings();
+                        delete amountSlider.saveTimeout;
+                    }, 500);
+                }
+                
+                // Update visual engine if enabled
+                if (audioSettings.freqMapping.enabled) {
+                    applyFreqMappingsToEngine();
+                }
+            }
+        });
+        
+        // Add to DOM
+        freqMappingsContainer.appendChild(mappingItem);
+    }
+    
+    // Function to load frequency mappings into the UI
+    function loadFreqMappingsUI() {
+        // Clear existing mappings
+        if (freqMappingsContainer) {
+            freqMappingsContainer.innerHTML = '';
+        }
+        
+        // Create UI for each mapping
+        audioSettings.freqMapping.mappings.forEach(mapping => {
+            createFreqMappingUI(mapping);
+        });
+    }
+    
+    // Function to apply frequency mappings to the visual engine
+    function applyFreqMappingsToEngine() {
+        if (!visualEngine) return;
+        
+        // Update frequency mapping settings
+        visualEngine.freqMapping.enabled = audioSettings.freqMapping.enabled;
+        visualEngine.freqMapping.sensitivity = audioSettings.freqMapping.sensitivity;
+        visualEngine.freqMapping.smoothing = audioSettings.freqMapping.smoothing;
+        
+        // Clear existing mappings
+        visualEngine.freqMapping.mappings = [];
+        
+        // Add each mapping from settings
+        audioSettings.freqMapping.mappings.forEach(mapping => {
+            // Get band start/end
+            let start, end;
+            
+            if (mapping.band.includes('-')) {
+                const parts = mapping.band.split('-');
+                start = parseInt(parts[0], 10);
+                end = parseInt(parts[1], 10);
+            } else if (visualEngine.freqMapping.bands[mapping.band]) {
+                start = visualEngine.freqMapping.bands[mapping.band].start;
+                end = visualEngine.freqMapping.bands[mapping.band].end;
+            } else {
+                console.error(`Invalid frequency band: ${mapping.band}`);
+                return; // Skip this mapping
+            }
+            
+            // Create mapping in the engine
+            visualEngine.freqMapping.mappings.push({
+                id: mapping.id,
+                band: mapping.band,
+                param: mapping.param,
+                amount: mapping.amount,
+                direction: mapping.direction,
+                start,
+                end,
+                active: true
+            });
+        });
+        
+        console.log('Applied frequency mappings to visual engine:', visualEngine.freqMapping);
+    }
+    
+    // Initialize frequency mapping event listeners
+    if (freqMappingEnabledCheckbox) {
+        freqMappingEnabledCheckbox.addEventListener('change', () => {
+            audioSettings.freqMapping.enabled = freqMappingEnabledCheckbox.checked;
+            saveAudioSettings();
+            
+            // Apply to visual engine
+            visualEngine.freqMapping.enabled = freqMappingEnabledCheckbox.checked;
+        });
+    }
+    
+    if (freqSensitivitySlider) {
+        freqSensitivitySlider.addEventListener('input', () => {
+            audioSettings.freqMapping.sensitivity = parseFloat(freqSensitivitySlider.value);
+            
+            // Save settings (but not too often for sliders)
+            if (!freqSensitivitySlider.saveTimeout) {
+                freqSensitivitySlider.saveTimeout = setTimeout(() => {
+                    saveAudioSettings();
+                    delete freqSensitivitySlider.saveTimeout;
+                }, 500);
+            }
+            
+            // Apply to visual engine
+            visualEngine.freqMapping.sensitivity = parseFloat(freqSensitivitySlider.value);
+        });
+    }
+    
+    if (freqSmoothingSlider) {
+        freqSmoothingSlider.addEventListener('input', () => {
+            audioSettings.freqMapping.smoothing = parseFloat(freqSmoothingSlider.value);
+            
+            // Save settings (but not too often for sliders)
+            if (!freqSmoothingSlider.saveTimeout) {
+                freqSmoothingSlider.saveTimeout = setTimeout(() => {
+                    saveAudioSettings();
+                    delete freqSmoothingSlider.saveTimeout;
+                }, 500);
+            }
+            
+            // Apply to visual engine
+            visualEngine.freqMapping.smoothing = parseFloat(freqSmoothingSlider.value);
+        });
+    }
+    
+    if (addFreqMappingButton) {
+        addFreqMappingButton.addEventListener('click', () => {
+            // Create a new mapping with default values
+            const newMapping = {
+                id: `mapping_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+                band: 'bass',
+                param: 'brightness',
+                amount: 0.5,
+                direction: 'normal'
+            };
+            
+            // Add to settings
+            audioSettings.freqMapping.mappings.push(newMapping);
+            
+            // Create in UI
+            createFreqMappingUI(newMapping);
+            
+            // Save settings
+            saveAudioSettings();
+            
+            // Apply to visual engine if enabled
+            if (audioSettings.freqMapping.enabled) {
+                applyFreqMappingsToEngine();
+            }
+        });
+    }
+    
+    // Load frequency mappings into the UI on page load
+    loadFreqMappingsUI();
+    
     function applyAudioSettings() {
         // Get values from the form
         const newSourceId = audioSourceSelect.value;
@@ -449,11 +795,27 @@ document.addEventListener('DOMContentLoaded', () => {
         audioSettings.selectedSourceId = newSourceId;
         audioSettings.bufferSize = newBufferSize;
         
+        // Update frequency mapping settings
+        if (freqMappingEnabledCheckbox) {
+            audioSettings.freqMapping.enabled = freqMappingEnabledCheckbox.checked;
+        }
+        
+        if (freqSensitivitySlider) {
+            audioSettings.freqMapping.sensitivity = parseFloat(freqSensitivitySlider.value);
+        }
+        
+        if (freqSmoothingSlider) {
+            audioSettings.freqMapping.smoothing = parseFloat(freqSmoothingSlider.value);
+        }
+        
         // Save settings
         saveAudioSettings();
         
         // Restart audio with new settings
         visualEngine.reinitializeAudio(newBufferSize, newSourceId);
+        
+        // Apply frequency mapping settings to visual engine
+        applyFreqMappingsToEngine();
         
         // Show confirmation
         const notification = document.createElement('div');
@@ -757,7 +1119,11 @@ document.addEventListener('DOMContentLoaded', () => {
             // Special handling for the oscilloscope
             if (isOscilloscope) {
                 console.log('Using 2D renderer for oscilloscope visualization');
-                visualEngine.setVisual('oscilloscope');
+                if (selectedValue === 'oscilloscope-stereo') {
+                    visualEngine.setVisual('oscilloscope-stereo');
+                } else {
+                    visualEngine.setVisual('oscilloscope');
+                }
             } else {
                 visualEngine.setVisual(selectedValue);
             }
@@ -784,7 +1150,11 @@ document.addEventListener('DOMContentLoaded', () => {
         else if (isOscilloscope) {
             // Switching to oscilloscope visualization from another 2D visualization
             console.log('Switching to 2D oscilloscope visualization');
-            visualEngine.setVisual('oscilloscope');
+            if (selectedValue === 'oscilloscope-stereo') {
+                visualEngine.setVisual('oscilloscope-stereo');
+            } else {
+                visualEngine.setVisual('oscilloscope');
+            }
         }
         else {
             // Switching between 2D visuals
