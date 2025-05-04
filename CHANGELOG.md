@@ -24,9 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improved Mac compatibility by replacing Alt+1/7/3 shortcuts with P key to cycle through oscilloscope phosphor types
 - Enhanced sensitivity and impact of frequency-to-parameter mappings for more noticeable effects
 - Added real-time frequency band visualization with interactive tooltips
-- Refactored codebase from monolithic structure to modular architecture
+- Completely refactored codebase from monolithic structure to modular architecture
 - Introduced event-based communication between modules for better separation of concerns
-- Improved code maintainability with clear module boundaries and responsibilities
+- Implemented proper module system with individual responsibility boundaries
+- Separated visualizations into dedicated modules
+- Relocated legacy code to maintain compatibility during transition
+- Improved code organization, readability, and maintainability
 
 ### Fixed
 - Fixed auto-rotation in 3D visualizers to respect rotation=0 parameter

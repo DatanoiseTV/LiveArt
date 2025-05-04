@@ -711,7 +711,10 @@ class WebGLVisuals {
         
         // Update display occasionally to avoid rapid changes
         if (performance.now() - this.lastFpsUpdate > this.fpsUpdateInterval) {
-            document.getElementById('fps').textContent = Math.round(this.fps);
+            const fpsElement = document.getElementById('fps');
+            if (fpsElement) {
+                fpsElement.textContent = Math.round(this.fps);
+            }
             this.lastFpsUpdate = performance.now();
         }
     }

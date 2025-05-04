@@ -23,7 +23,10 @@ import uiManager from './ui/ui-manager.js';
 import frequencyVisualizer from './ui/frequency-visualizer.js';
 
 // Import visual modules
-// These will be imported as needed
+import VisualEngine from './visuals/visual-engine.js';
+import OscilloscopeVisualizer from './visuals/oscilloscope.js';
+import AudioReactiveVisualizer from './visuals/audio-reactive.js';
+import WebGLEngine from './webgl/webgl-engine.js';
 
 // Set debug mode based on URL parameter
 const urlParams = new URLSearchParams(window.location.search);
@@ -43,11 +46,29 @@ document.addEventListener('DOMContentLoaded', () => {
             debugMode
         });
         
+        // Initialize visual engines
+        const visualEngine = new VisualEngine('canvas-2d');
+        visualEngine.init();
+        
+        const webglEngine = new WebGLEngine('container-3d');
+        webglEngine.init();
+        
+        // Initialize visualizations
+        const oscilloscope = new OscilloscopeVisualizer(visualEngine);
+        oscilloscope.init();
+        
+        const audioReactive = new AudioReactiveVisualizer(visualEngine);
+        audioReactive.init();
+        
+        // Set initial visualization
+        const initialVisual = 'oscilloscope';
+        events.trigger('engine:visualChanged', {
+            visualId: initialVisual,
+            isWebGL: false
+        });
+        
         // Log initialization complete
         LiveArt.log('LiveArt initialized successfully!');
-        
-        // Dynamically load visualizations based on settings
-        // This would typically happen based on selected visualization
         
         // Remove loading indicator after a short delay
         setTimeout(() => {
